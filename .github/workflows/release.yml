@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "已有的发布 Tag，例如 v3.20.4"
+        description: "已有的发布 Tag，例如 v3.20.5"
         required: true
         type: string
 
@@ -370,11 +370,11 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: CC Switch ${{ env.RELEASE_TAG }}
-          prerelease: true
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           body: |
             ## CC Switch ${{ env.RELEASE_TAG }}
 
-            这是 `jixiwen/cc-switch` 的 Codex 路由功能测试版，不代表上游官方发布。
+            这是 `jixiwen/cc-switch` 的 Codex 多供应商模型路由社区版本，不代表上游官方发布。
 
             ### 下载
 
