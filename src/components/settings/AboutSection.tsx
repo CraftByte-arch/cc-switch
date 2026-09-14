@@ -454,7 +454,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
       }
 
       await settingsApi.openExternal(
-        `https://github.com/jixiwen/cc-switch/releases/tag/${displayVersion}`,
+        `https://github.com/CraftByte-arch/cc-switch/releases/tag/${displayVersion}`,
       );
     } catch (error) {
       console.error("[AboutSection] Failed to open release notes", error);
@@ -918,7 +918,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               variant="outline"
               size="sm"
               onClick={() =>
-                settingsApi.openExternal("https://github.com/jixiwen/cc-switch")
+                settingsApi.openExternal(
+                  "https://github.com/CraftByte-arch/cc-switch",
+                )
               }
               className="h-8 gap-1.5 text-xs"
             >

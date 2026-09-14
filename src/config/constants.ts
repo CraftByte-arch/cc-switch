@@ -20,7 +20,8 @@ export const OAUTH_PROVIDER_TYPES: readonly string[] = [
  * missing latest.json on every startup in the meantime.
  */
 export const APP_AUTO_UPDATE_ENABLED = false;
-export const APP_RELEASES_URL = "https://github.com/jixiwen/cc-switch/releases";
+export const APP_RELEASES_URL =
+  "https://github.com/CraftByte-arch/cc-switch/releases";
 
 /** 判断某 providerType 是否为托管 OAuth（凭据由代理注入、必须开启路由）。 */
 export function isOAuthProviderType(

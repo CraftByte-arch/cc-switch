@@ -4,12 +4,12 @@
 
 ### The All-in-One Manager for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw & Hermes Agent
 
-[![Version](https://img.shields.io/github/v/release/jixiwen/cc-switch?color=blue&label=version)](https://github.com/jixiwen/cc-switch/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/jixiwen/cc-switch/releases)
+[![Version](https://img.shields.io/github/v/release/CraftByte-arch/cc-switch?color=blue&label=version)](https://github.com/CraftByte-arch/cc-switch/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/CraftByte-arch/cc-switch/releases)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-orange.svg)](https://tauri.app/)
-[![Downloads](https://img.shields.io/github/downloads/jixiwen/cc-switch/total)](https://github.com/jixiwen/cc-switch/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/CraftByte-arch/cc-switch/total)](https://github.com/CraftByte-arch/cc-switch/releases/latest)
 
-### Community Fork: **[jixiwen/cc-switch](https://github.com/jixiwen/cc-switch)**
+### Community Fork: **[CraftByte-arch/cc-switch](https://github.com/CraftByte-arch/cc-switch)**
 
 English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md) | [Changelog](CHANGELOG.md)
 
