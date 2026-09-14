@@ -35,16 +35,31 @@ export function modelRoutingOptions(provider: Provider): CodexCatalogModel[] {
   });
 }
 
-/** Replace a station in-place for a model, retaining its menu/default order. */
+export function modelRoutingSelectionKey(
+  selection: CodexModelSelection,
+): string {
+  return JSON.stringify([selection.providerId, selection.model]);
+}
+
+export function modelRoutingModelLabel(model: CodexCatalogModel): string {
+  return model.displayName?.trim() || model.model;
+}
+
+export function modelRoutingCombinationKey(
+  provider: Provider,
+  model: CodexCatalogModel,
+): string {
+  return JSON.stringify([provider.name.trim(), modelRoutingModelLabel(model)]);
+}
+
+/** Append a distinct provider/model route while retaining menu/default order. */
 export function selectRoutedModel(
   selections: CodexModelSelection[],
   target: CodexModelSelection,
 ): CodexModelSelection[] {
-  const existing = selections.findIndex(
-    (entry) => entry.model === target.model,
+  const targetKey = modelRoutingSelectionKey(target);
+  const exists = selections.some(
+    (entry) => modelRoutingSelectionKey(entry) === targetKey,
   );
-  if (existing < 0) return [...selections, target];
-  return selections.map((entry, index) =>
-    index === existing ? target : entry,
-  );
+  return exists ? selections : [...selections, target];
 }

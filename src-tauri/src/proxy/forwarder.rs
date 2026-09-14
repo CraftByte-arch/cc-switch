@@ -169,6 +169,7 @@ pub struct RequestForwarder {
     /// 请求开始时的"当前供应商 ID"（用于判断是否需要同步 UI/托盘）
     current_provider_id_at_start: String,
     codex_model_routed: bool,
+    codex_routed_model: Option<String>,
     /// 代理会话 ID（用于 Gemini Native shadow replay）
     session_id: String,
     /// Session ID 是否由客户端提供；生成值不能作为上游缓存身份。
@@ -192,8 +193,9 @@ pub struct RequestForwarder {
 }
 
 impl RequestForwarder {
-    pub fn with_codex_model_routing(mut self, enabled: bool) -> Self {
-        self.codex_model_routed = enabled;
+    pub fn with_codex_model_routing(mut self, upstream_model: Option<String>) -> Self {
+        self.codex_model_routed = upstream_model.is_some();
+        self.codex_routed_model = upstream_model;
         self
     }
     /// 预防式 media 降级：发送前对 text-only 模型把图片块替换为标记。
@@ -274,6 +276,7 @@ impl RequestForwarder {
             app_handle,
             current_provider_id_at_start,
             codex_model_routed: false,
+            codex_routed_model: None,
             session_id,
             session_client_provided,
             rectifier_config,
@@ -1252,9 +1255,13 @@ impl RequestForwarder {
         // Claude Desktop proxy 模式必须先把 Desktop 可见的 claude-* route
         // 映射成真实上游模型名，并且未知 route 要直接报错，不能使用默认模型兜底。
         let mapped_body = if self.codex_model_routed && matches!(app_type, AppType::Codex) {
-            // The selected catalog ID IS the upstream model. Do not apply a
-            // legacy provider default or Claude env model mapping over it.
-            body.clone()
+            // Codex sends the hidden `<model>@<provider>` catalog slug. Restore
+            // the selected station's real model before any protocol transform.
+            let mut routed_body = body.clone();
+            if let Some(upstream_model) = &self.codex_routed_model {
+                routed_body["model"] = serde_json::json!(upstream_model);
+            }
+            routed_body
         } else if matches!(app_type, AppType::ClaudeDesktop) {
             crate::claude_desktop_config::map_proxy_request_model(body.clone(), provider)
                 .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?
@@ -3899,6 +3906,7 @@ mod tests {
             app_handle: None,
             current_provider_id_at_start: String::new(),
             codex_model_routed: false,
+            codex_routed_model: None,
             session_id: String::new(),
             session_client_provided: false,
             rectifier_config: RectifierConfig::default(),

@@ -16,7 +16,15 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, GripVertical, Loader2, Search, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  GripVertical,
+  Loader2,
+  Pencil,
+  Search,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { CodexCatalogModel, Provider } from "@/types";
 import type {
@@ -27,6 +35,12 @@ import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   useCodexModelRouting,
@@ -34,7 +48,10 @@ import {
 } from "@/lib/query/codexModelRouting";
 import {
   isModelRoutingProvider,
+  modelRoutingCombinationKey,
+  modelRoutingModelLabel,
   modelRoutingOptions,
+  modelRoutingSelectionKey,
   selectRoutedModel,
 } from "@/utils/codexModelRouting";
 import { extractErrorMessage } from "@/utils/errorUtils";
@@ -68,6 +85,8 @@ function SelectedModel({
   entry,
   provider,
   model,
+  displayName,
+  conflict,
   index,
   disabled,
   onRemove,
@@ -75,13 +94,15 @@ function SelectedModel({
   entry: CodexModelSelection;
   provider?: Provider;
   model?: CodexCatalogModel;
+  displayName: string;
+  conflict: boolean;
   index: number;
   disabled: boolean;
   onRemove: () => void;
 }) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: entry.model, disabled });
+    useSortable({ id: modelRoutingSelectionKey(entry), disabled });
   return (
     <div
       ref={setNodeRef}
@@ -89,6 +110,8 @@ function SelectedModel({
       className={cn(
         "flex min-w-0 items-center gap-2 rounded-xl border border-border-default bg-muted/20 p-2",
         !model && "border-destructive",
+        conflict &&
+          "border-amber-400/70 bg-amber-50/70 dark:border-amber-500/50 dark:bg-amber-950/30",
       )}
     >
       <button
@@ -106,14 +129,15 @@ function SelectedModel({
       </button>
       <span className="text-xs tabular-nums text-primary">{index + 1}</span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
-          <span className="font-semibold">
-            {provider?.name ?? entry.providerId}
-          </span>
+        <div className="break-all text-sm font-semibold">{displayName}</div>
+        <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
+          <span>{provider?.name ?? entry.providerId}</span>
           <span className="break-all font-mono">{entry.model}</span>
         </div>
         {model ? (
-          <Reasoning model={model} />
+          <div className="mt-0.5">
+            <Reasoning model={model} />
+          </div>
         ) : (
           <span className="text-xs text-destructive">
             {t("codexRouting.missing", {
@@ -143,11 +167,13 @@ export function CodexModelRoutingDialog({
   onOpenChange,
   providers,
   active,
+  onEditProvider,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   providers: Record<string, Provider>;
   active: boolean;
+  onEditProvider: (provider: Provider) => void;
 }) {
   const { t } = useTranslation();
   const query = useCodexModelRouting();
@@ -157,9 +183,6 @@ export function CodexModelRoutingDialog({
   const [initialized, setInitialized] = useState(false);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
-  const [replacement, setReplacement] = useState<CodexModelSelection | null>(
-    null,
-  );
   const [discard, setDiscard] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -191,15 +214,91 @@ export function CodexModelRoutingDialog({
         })),
     [providers],
   );
+  const routingIndex = useMemo(() => {
+    const bySelection = new Map<
+      string,
+      {
+        provider: Provider;
+        model: CodexCatalogModel;
+        combinationKey: string;
+      }
+    >();
+    const byCombination = new Map<
+      string,
+      Array<{ provider: Provider; model: CodexCatalogModel }>
+    >();
+
+    for (const group of groups) {
+      for (const model of group.models) {
+        const selection = {
+          providerId: group.provider.id,
+          model: model.model,
+        };
+        const combinationKey = modelRoutingCombinationKey(
+          group.provider,
+          model,
+        );
+        bySelection.set(modelRoutingSelectionKey(selection), {
+          provider: group.provider,
+          model,
+          combinationKey,
+        });
+        const options = byCombination.get(combinationKey) ?? [];
+        options.push({ provider: group.provider, model });
+        byCombination.set(combinationKey, options);
+      }
+    }
+
+    return {
+      bySelection,
+      conflicts: Array.from(byCombination.entries())
+        .filter(([, options]) => options.length > 1)
+        .map(([key, options]) => ({ key, options })),
+    };
+  }, [groups]);
+  const selectedState = useMemo(() => {
+    const modelNameCounts = new Map<string, number>();
+    const combinationCounts = new Map<string, number>();
+    const details = new Map<
+      string,
+      {
+        provider?: Provider;
+        model?: CodexCatalogModel;
+        modelName: string;
+        combinationKey?: string;
+      }
+    >();
+
+    for (const entry of draft.models) {
+      const selectionKey = modelRoutingSelectionKey(entry);
+      const option = routingIndex.bySelection.get(selectionKey);
+      const modelName = option
+        ? modelRoutingModelLabel(option.model)
+        : entry.model;
+      details.set(selectionKey, {
+        provider: option?.provider,
+        model: option?.model,
+        modelName,
+        combinationKey: option?.combinationKey,
+      });
+      modelNameCounts.set(modelName, (modelNameCounts.get(modelName) ?? 0) + 1);
+      if (option) {
+        combinationCounts.set(
+          option.combinationKey,
+          (combinationCounts.get(option.combinationKey) ?? 0) + 1,
+        );
+      }
+    }
+
+    return { details, modelNameCounts, combinationCounts };
+  }, [draft.models, routingIndex]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
   const selectedMissing = draft.models.some(
-    (entry) =>
-      !groups.some(
-        (group) =>
-          group.provider.id === entry.providerId &&
-          group.models.some((model) => model.model === entry.model),
-      ),
+    (entry) => !routingIndex.bySelection.has(modelRoutingSelectionKey(entry)),
   );
+  const selectedConflict = Array.from(
+    selectedState.combinationCounts.values(),
+  ).some((count) => count > 1);
   const visibleGroups = groups
     .map((group) => ({
       ...group,
@@ -218,14 +317,17 @@ export function CodexModelRoutingDialog({
     }
   };
   const choose = (entry: CodexModelSelection) => {
-    const existing = draft.models.find((row) => row.model === entry.model);
-    if (existing?.providerId === entry.providerId) {
+    const targetKey = modelRoutingSelectionKey(entry);
+    const existing = draft.models.some(
+      (row) => modelRoutingSelectionKey(row) === targetKey,
+    );
+    if (existing) {
       setDraft({
         ...draft,
-        models: draft.models.filter((row) => row.model !== entry.model),
+        models: draft.models.filter(
+          (row) => modelRoutingSelectionKey(row) !== targetKey,
+        ),
       });
-    } else if (existing) {
-      setReplacement(entry);
     } else {
       setDraft({ ...draft, models: selectRoutedModel(draft.models, entry) });
     }
@@ -281,6 +383,7 @@ export function CodexModelRoutingDialog({
                 pending ||
                 !draft.providerName.trim() ||
                 selectedMissing ||
+                selectedConflict ||
                 (active && !draft.models.length)
               }
             >
@@ -336,6 +439,55 @@ export function CodexModelRoutingDialog({
               })}
             </p>
           </div>
+          {routingIndex.conflicts.length > 0 && (
+            <div
+              role="status"
+              className="flex items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50 px-4 py-3 text-amber-950 dark:border-amber-500/40 dark:bg-amber-950/35 dark:text-amber-100"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="min-w-0 space-y-2">
+                <p className="text-sm font-medium">
+                  {t("codexRouting.duplicateCombinationTitle", {
+                    count: routingIndex.conflicts.length,
+                    defaultValue:
+                      "检测到 {{count}} 组相同的供应商名称和模型显示名称",
+                  })}
+                </p>
+                <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                  {t("codexRouting.duplicateCombinationHint", {
+                    defaultValue:
+                      "为避免 Codex 菜单无法区分，同一组合只能启用一个。可点击下方供应商旁的“编辑”，修改供应商名称或模型显示名称。",
+                  })}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {routingIndex.conflicts
+                    .slice(0, 4)
+                    .map(({ key, options }) => (
+                      <span
+                        key={key}
+                        className="rounded-md border border-amber-300/70 bg-white/70 px-2 py-1 text-xs font-medium dark:border-amber-500/40 dark:bg-amber-950/50"
+                      >
+                        {options[0].provider.name} ·{" "}
+                        {modelRoutingModelLabel(options[0].model)}
+                      </span>
+                    ))}
+                  {routingIndex.conflicts.length > 4 && (
+                    <span className="px-1 py-1 text-xs">
+                      +{routingIndex.conflicts.length - 4}
+                    </span>
+                  )}
+                </div>
+                {selectedConflict && (
+                  <p className="text-xs font-semibold text-amber-900 dark:text-amber-100">
+                    {t("codexRouting.selectedCombinationConflict", {
+                      defaultValue:
+                        "当前已选择模型中存在冲突，请取消其中一项或先编辑供应商后再保存。",
+                    })}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
           <section className="space-y-3">
             <div>
               <h3 className="text-sm font-semibold">
@@ -364,10 +516,10 @@ export function CodexModelRoutingDialog({
                 onDragEnd={({ active: dragged, over }) => {
                   if (!over || pending) return;
                   const from = draft.models.findIndex(
-                    (entry) => entry.model === dragged.id,
+                    (entry) => modelRoutingSelectionKey(entry) === dragged.id,
                   );
                   const to = draft.models.findIndex(
-                    (entry) => entry.model === over.id,
+                    (entry) => modelRoutingSelectionKey(entry) === over.id,
                   );
                   if (from >= 0 && to >= 0)
                     setDraft({
@@ -377,32 +529,49 @@ export function CodexModelRoutingDialog({
                 }}
               >
                 <SortableContext
-                  items={draft.models.map((entry) => entry.model)}
+                  items={draft.models.map(modelRoutingSelectionKey)}
                   strategy={rectSortingStrategy}
                 >
                   <div className="grid gap-2 md:grid-cols-2">
-                    {draft.models.map((entry, index) => (
-                      <SelectedModel
-                        key={entry.model}
-                        entry={entry}
-                        index={index}
-                        disabled={pending}
-                        provider={providers[entry.providerId]}
-                        model={groups
-                          .find(
-                            (group) => group.provider.id === entry.providerId,
-                          )
-                          ?.models.find((model) => model.model === entry.model)}
-                        onRemove={() =>
-                          setDraft({
-                            ...draft,
-                            models: draft.models.filter(
-                              (row) => row.model !== entry.model,
-                            ),
-                          })
-                        }
-                      />
-                    ))}
+                    {draft.models.map((entry, index) => {
+                      const selectionKey = modelRoutingSelectionKey(entry);
+                      const detail = selectedState.details.get(selectionKey);
+                      const duplicateModelName =
+                        (selectedState.modelNameCounts.get(
+                          detail?.modelName ?? entry.model,
+                        ) ?? 0) > 1;
+                      const displayName = duplicateModelName
+                        ? `${detail?.provider?.name ?? entry.providerId} · ${detail?.modelName ?? entry.model}`
+                        : (detail?.modelName ?? entry.model);
+                      const conflict = Boolean(
+                        detail?.combinationKey &&
+                          (selectedState.combinationCounts.get(
+                            detail.combinationKey,
+                          ) ?? 0) > 1,
+                      );
+                      return (
+                        <SelectedModel
+                          key={selectionKey}
+                          entry={entry}
+                          index={index}
+                          disabled={pending}
+                          provider={detail?.provider}
+                          model={detail?.model}
+                          displayName={displayName}
+                          conflict={conflict}
+                          onRemove={() =>
+                            setDraft({
+                              ...draft,
+                              models: draft.models.filter(
+                                (row) =>
+                                  modelRoutingSelectionKey(row) !==
+                                  selectionKey,
+                              ),
+                            })
+                          }
+                        />
+                      );
+                    })}
                   </div>
                 </SortableContext>
               </DndContext>
@@ -430,66 +599,138 @@ export function CodexModelRoutingDialog({
                 />
               </div>
             </div>
-            {visibleGroups.map(({ provider, visible }) => (
-              <div
-                key={provider.id}
-                className="flex flex-col gap-3 sm:flex-row sm:items-start"
-              >
-                <span className="shrink-0 self-start rounded-full bg-muted px-3 py-2 text-sm font-semibold sm:w-36 break-words">
-                  {provider.name}
-                </span>
-                <div className="flex flex-1 flex-wrap gap-2">
-                  {visible.map((model) => {
-                    const selected = draft.models.some(
-                      (entry) =>
-                        entry.providerId === provider.id &&
-                        entry.model === model.model,
-                    );
-                    return (
-                      <button
-                        key={model.model}
-                        type="button"
-                        aria-pressed={selected}
-                        disabled={pending || !initialized}
-                        onClick={() =>
-                          choose({
-                            providerId: provider.id,
-                            model: model.model,
-                          })
-                        }
-                        aria-label={`${provider.name} / ${model.model}`}
-                        className={cn(
-                          "max-w-full rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
-                          selected
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border-default hover:bg-muted",
-                        )}
-                      >
-                        <span className="flex items-center gap-2 text-sm">
-                          <span className="w-4 shrink-0">
-                            {selected && <Check className="h-4 w-4" />}
-                          </span>
-                          <span className="break-all font-mono">
-                            {model.model}
-                          </span>
-                        </span>
-                        <span className="ml-6 block">
-                          <Reasoning model={model} />
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {!visible.length && (
-                    <p className="py-2 text-xs text-muted-foreground">
-                      {t("codexRouting.noCatalog", {
-                        defaultValue:
-                          "还没有模型映射，请先在该供应商的编辑页添加模型。",
+            <TooltipProvider delayDuration={250}>
+              {visibleGroups.map(({ provider, visible }) => (
+                <div
+                  key={provider.id}
+                  className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                >
+                  <div className="flex shrink-0 items-center gap-1 self-start sm:w-44">
+                    <span className="min-w-0 flex-1 break-words rounded-full bg-muted px-3 py-2 text-sm font-semibold">
+                      {provider.name}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-9 shrink-0 gap-1 px-2 text-xs text-muted-foreground"
+                      disabled={pending}
+                      onClick={() => onEditProvider(provider)}
+                      aria-label={t("codexRouting.editProvider", {
+                        provider: provider.name,
+                        defaultValue: "编辑供应商 {{provider}}",
                       })}
-                    </p>
-                  )}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      {t("common.edit", { defaultValue: "编辑" })}
+                    </Button>
+                  </div>
+                  <div className="flex flex-1 flex-wrap gap-2">
+                    {visible.map((model) => {
+                      const selection = {
+                        providerId: provider.id,
+                        model: model.model,
+                      };
+                      const selectionKey = modelRoutingSelectionKey(selection);
+                      const selected = draft.models.some(
+                        (entry) =>
+                          modelRoutingSelectionKey(entry) === selectionKey,
+                      );
+                      const combinationKey = modelRoutingCombinationKey(
+                        provider,
+                        model,
+                      );
+                      const conflictingSelection = draft.models.find(
+                        (entry) => {
+                          const entryKey = modelRoutingSelectionKey(entry);
+                          if (entryKey === selectionKey) return false;
+                          return (
+                            routingIndex.bySelection.get(entryKey)
+                              ?.combinationKey === combinationKey
+                          );
+                        },
+                      );
+                      const blocked =
+                        !selected && Boolean(conflictingSelection);
+                      const modelLabel = modelRoutingModelLabel(model);
+                      const conflictReason = t(
+                        "codexRouting.duplicateCombinationDisabled",
+                        {
+                          provider: provider.name,
+                          model: modelLabel,
+                          defaultValue:
+                            "“{{provider}} · {{model}}”与另一个已选模型使用相同的供应商名称和模型显示名称。请先修改其中一个供应商名称或模型显示名称，再启用此项。",
+                        },
+                      );
+                      const modelButton = (
+                        <button
+                          type="button"
+                          aria-pressed={selected}
+                          disabled={pending || !initialized || blocked}
+                          onClick={() => choose(selection)}
+                          aria-label={`${provider.name} / ${modelLabel}`}
+                          className={cn(
+                            "max-w-full rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            selected
+                              ? "border-primary bg-primary/10 text-primary"
+                              : blocked
+                                ? "cursor-not-allowed border-border-default bg-muted/60 text-muted-foreground opacity-60"
+                                : "border-border-default hover:bg-muted",
+                            (pending || !initialized) && "opacity-50",
+                          )}
+                        >
+                          <span className="flex items-center gap-2 text-sm">
+                            <span className="w-4 shrink-0">
+                              {selected && <Check className="h-4 w-4" />}
+                            </span>
+                            <span className="break-all font-medium">
+                              {modelLabel}
+                            </span>
+                          </span>
+                          {modelLabel !== model.model && (
+                            <span className="ml-6 block break-all font-mono text-xs text-muted-foreground">
+                              {model.model}
+                            </span>
+                          )}
+                          <span className="ml-6 block">
+                            <Reasoning model={model} />
+                          </span>
+                        </button>
+                      );
+
+                      if (!blocked) {
+                        return <span key={selectionKey}>{modelButton}</span>;
+                      }
+
+                      return (
+                        <Tooltip key={selectionKey}>
+                          <TooltipTrigger asChild>
+                            <span
+                              tabIndex={0}
+                              aria-label={conflictReason}
+                              className="inline-flex max-w-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              {modelButton}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs leading-relaxed">
+                            {conflictReason}
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    })}
+                    {!visible.length && (
+                      <p className="py-2 text-xs text-muted-foreground">
+                        {t("codexRouting.noCatalog", {
+                          defaultValue:
+                            "还没有模型映射，请先在该供应商的编辑页添加模型。",
+                        })}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </TooltipProvider>
             {!visibleGroups.length && (
               <p className="py-4 text-sm text-muted-foreground">
                 {t("codexRouting.noProviders", {
@@ -502,7 +743,7 @@ export function CodexModelRoutingDialog({
           <p className="text-xs leading-relaxed text-muted-foreground">
             {t("codexRouting.safetyHint", {
               defaultValue:
-                "首版仅支持 API Key 供应商，同名模型选择一家。不使用全局故障转移。跨站切换后，依赖原站响应 ID 的已有会话可能需要新建；不会清除或改写历史。",
+                "仅支持 API Key 供应商。不同供应商可以同时启用同一个模型；Codex 菜单会自动区分来源。不使用全局故障转移。跨站切换后，依赖原站响应 ID 的已有会话可能需要新建；不会清除或改写历史。",
             })}
           </p>
           {error && (
@@ -512,26 +753,6 @@ export function CodexModelRoutingDialog({
           )}
         </div>
       </FullScreenPanel>
-      <ConfirmDialog
-        isOpen={Boolean(replacement)}
-        variant="info"
-        title={t("codexRouting.replace", { defaultValue: "更换模型来源" })}
-        message={t("codexRouting.replaceConfirm", {
-          model: replacement?.model,
-          provider: replacement ? providers[replacement.providerId]?.name : "",
-          defaultValue:
-            "将 {{model}} 改为使用 {{provider}}。模型名称和菜单顺序保持不变，推理等级等能力继承新供应商；保存后生效。",
-        })}
-        onConfirm={() => {
-          if (replacement)
-            setDraft({
-              ...draft,
-              models: selectRoutedModel(draft.models, replacement),
-            });
-          setReplacement(null);
-        }}
-        onCancel={() => setReplacement(null)}
-      />
       <ConfirmDialog
         isOpen={discard}
         title={t("codexRouting.discard", {

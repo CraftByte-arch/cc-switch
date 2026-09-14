@@ -187,6 +187,9 @@ impl ProxyService {
         config
             .validate(&providers, active)
             .map_err(|e| e.to_string())?;
+        config
+            .validate_visible_combinations(&providers)
+            .map_err(|e| e.to_string())?;
         let files = if active {
             Some(RouterFiles::capture()?)
         } else {
@@ -235,6 +238,9 @@ impl ProxyService {
                 .map_err(|e| e.to_string())?;
             let (_, url) = self.build_proxy_urls().await?;
             self.validate_model_routing_targets(&config, &providers, &url)?;
+            config
+                .validate_visible_combinations(&providers)
+                .map_err(|e| e.to_string())?;
             config.catalog(&providers).map_err(|e| e.to_string())?;
             let snapshot = RouterFiles::capture()?;
             self.db

@@ -7,7 +7,7 @@ use crate::{database::Database, error::AppError, provider::Provider};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub const SETTINGS_KEY: &str = "codex_model_routing_v1";
 pub const CATALOG_FILENAME: &str = "cc-switch-router-model-catalog.json";
@@ -20,13 +20,24 @@ pub struct ModelSelection {
     pub model: String,
 }
 
+impl ModelSelection {
+    pub fn routed_model_id(&self) -> String {
+        format!("{}@{}", self.model, self.provider_id)
+    }
+}
+
+pub struct ResolvedModelRoute {
+    pub provider: Provider,
+    pub upstream_model: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct CodexModelRoutingConfig {
     /// Mode preference. Actual activation also requires Codex takeover.
     pub enabled: bool,
     pub provider_name: String,
-    /// Ordered, unique model IDs; first entry is the initial default.
+    /// Ordered, unique provider/model routes; first entry is the initial default.
     pub models: Vec<ModelSelection>,
 }
 
@@ -78,6 +89,26 @@ pub fn has_model(provider: &Provider, model: &str) -> bool {
         })
 }
 
+fn model_display_name(provider: &Provider, model: &str) -> String {
+    provider
+        .settings_config
+        .pointer("/modelCatalog/models")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row.get("model").and_then(Value::as_str).map(str::trim) == Some(model))
+        })
+        .and_then(|row| {
+            row.get("displayName")
+                .or_else(|| row.get("display_name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+        })
+        .unwrap_or(model)
+        .to_string()
+}
+
 impl CodexModelRoutingConfig {
     pub fn references_provider(&self, id: &str) -> bool {
         self.models.iter().any(|entry| entry.provider_id == id)
@@ -102,16 +133,28 @@ impl CodexModelRoutingConfig {
         if self.models.len() > 256 {
             return Err(AppError::InvalidInput("最多启用 256 个模型".into()));
         }
-        let mut seen = HashSet::new();
+        let mut seen_selections = HashSet::new();
+        let mut seen_routed_models = HashSet::new();
         for entry in &self.models {
             if entry.model.is_empty()
                 || entry.model.trim() != entry.model
                 || entry.model.chars().any(char::is_control)
-                || !seen.insert(&entry.model)
             {
                 return Err(AppError::InvalidInput(format!(
-                    "模型名称无效或重复：{}；同名模型请选择一家供应商",
+                    "模型名称无效：{}",
                     entry.model
+                )));
+            }
+            if !seen_selections.insert((entry.provider_id.clone(), entry.model.clone())) {
+                return Err(AppError::InvalidInput(format!(
+                    "模型路由重复：{}",
+                    entry.routed_model_id()
+                )));
+            }
+            if !seen_routed_models.insert(entry.routed_model_id()) {
+                return Err(AppError::InvalidInput(format!(
+                    "模型路由标识冲突：{}",
+                    entry.routed_model_id()
                 )));
             }
             let provider = providers.get(&entry.provider_id).ok_or_else(|| {
@@ -133,11 +176,38 @@ impl CodexModelRoutingConfig {
         Ok(())
     }
 
+    pub fn validate_visible_combinations(
+        &self,
+        providers: &IndexMap<String, Provider>,
+    ) -> Result<(), AppError> {
+        let mut seen = HashSet::new();
+        for entry in &self.models {
+            let provider = providers.get(&entry.provider_id).ok_or_else(|| {
+                AppError::InvalidInput(format!("供应商已不存在：{}", entry.provider_id))
+            })?;
+            let display_name = model_display_name(provider, &entry.model);
+            if !seen.insert((provider.name.trim().to_string(), display_name.clone())) {
+                return Err(AppError::InvalidInput(format!(
+                    "“{} · {}”与另一个已选模型使用相同的供应商名称和模型显示名称，请先修改供应商名称或模型显示名称",
+                    provider.name.trim(),
+                    display_name
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Generate each entry with ITS provider's protocol/tool profile. Merely
     /// concatenating raw form rows or using one global profile loses reasoning,
     /// vision, context limits and native/Chat/Anthropic tool compatibility.
     pub fn catalog(&self, providers: &IndexMap<String, Provider>) -> Result<Value, AppError> {
         self.validate(providers, true)?;
+        let mut display_name_counts = HashMap::new();
+        for selection in &self.models {
+            let provider = &providers[&selection.provider_id];
+            let display_name = model_display_name(provider, &selection.model);
+            *display_name_counts.entry(display_name).or_insert(0usize) += 1;
+        }
         let mut entries = Vec::with_capacity(self.models.len());
         for (index, selection) in self.models.iter().enumerate() {
             let provider = &providers[&selection.provider_id];
@@ -164,6 +234,15 @@ impl CodexModelRoutingConfig {
                 .ok_or_else(|| {
                     AppError::Config(format!("无法生成模型目录：{}", selection.model))
                 })?;
+            let model_name = model_display_name(provider, &selection.model);
+            let display_name = if display_name_counts.get(&model_name).copied().unwrap_or(0) > 1 {
+                format!("{} · {}", provider.name.trim(), model_name)
+            } else {
+                model_name
+            };
+            entry["slug"] = json!(selection.routed_model_id());
+            entry["display_name"] = json!(display_name);
+            entry["description"] = json!(display_name);
             entry["priority"] = json!(1000 + index);
             entries.push(entry);
         }
@@ -172,23 +251,41 @@ impl CodexModelRoutingConfig {
 
     /// Exact IDs only. Unknown IDs fail closed instead of falling through to an
     /// unrelated current provider (which may not have the user's intended model).
-    pub fn resolve(&self, db: &Database, model: &str) -> Result<Provider, AppError> {
+    pub fn resolve(&self, db: &Database, model: &str) -> Result<ResolvedModelRoute, AppError> {
         let selection = self
             .models
             .iter()
-            .find(|entry| entry.model == model)
-            .ok_or_else(|| AppError::InvalidInput(format!("Codex 模型未启用路由：{model}")))?;
+            .find(|entry| entry.routed_model_id() == model);
+        // Accept the previous bare slug only while it still identifies one route.
+        // This keeps an already-open Codex usable during the first catalog refresh.
+        let selection = match selection {
+            Some(selection) => selection,
+            None => {
+                let mut legacy_matches = self.models.iter().filter(|entry| entry.model == model);
+                match (legacy_matches.next(), legacy_matches.next()) {
+                    (Some(selection), None) => selection,
+                    _ => {
+                        return Err(AppError::InvalidInput(format!(
+                            "Codex 模型未启用路由：{model}"
+                        )))
+                    }
+                }
+            }
+        };
         let provider = db
             .get_provider_by_id(&selection.provider_id, "codex")?
             .ok_or_else(|| {
                 AppError::InvalidInput("模型对应的供应商已被删除，请重新配置路由".into())
             })?;
-        if !provider_is_eligible(&provider) || !has_model(&provider, model) {
+        if !provider_is_eligible(&provider) || !has_model(&provider, &selection.model) {
             return Err(AppError::InvalidInput(
                 "模型对应的供应商配置已变化，请重新配置路由".into(),
             ));
         }
-        Ok(provider)
+        Ok(ResolvedModelRoute {
+            provider,
+            upstream_model: selection.model.clone(),
+        })
     }
 }
 
@@ -207,12 +304,20 @@ pub fn project_config(
         return Err(AppError::InvalidInput("请至少选择一个 Codex 模型".into()));
     }
     let current = doc.get("model").and_then(|item| item.as_str());
-    if !config
-        .models
-        .iter()
-        .any(|entry| Some(entry.model.as_str()) == current)
-    {
-        doc["model"] = toml_edit::value(&config.models[0].model);
+    let selected = current
+        .and_then(|model| {
+            config
+                .models
+                .iter()
+                .find(|entry| entry.routed_model_id() == model)
+        })
+        .or_else(|| {
+            current.and_then(|model| config.models.iter().find(|entry| entry.model == model))
+        })
+        .unwrap_or(&config.models[0]);
+    let routed_model = selected.routed_model_id();
+    if current != Some(routed_model.as_str()) {
+        doc["model"] = toml_edit::value(routed_model);
         // A default effort for a removed model may not exist on the new one.
         doc.as_table_mut().remove("model_reasoning_effort");
     }
@@ -272,6 +377,16 @@ mod tests {
             ..Default::default()
         }
     }
+
+    fn named_provider(id: &str, name: &str, display_name: Option<&str>) -> Provider {
+        let mut provider = provider(id);
+        provider.name = name.to_string();
+        if let Some(display_name) = display_name {
+            provider.settings_config["modelCatalog"]["models"][0]["displayName"] =
+                json!(display_name);
+        }
+        provider
+    }
     #[test]
     fn defaults_and_reference_roundtrip() {
         let db = Database::memory().unwrap();
@@ -287,8 +402,13 @@ mod tests {
         db.save_provider("codex", &provider("a")).unwrap();
         db.save_provider("codex", &provider("b")).unwrap();
         db.set_current_provider("codex", "a").unwrap();
-        assert_eq!(config("a").resolve(&db, "x").unwrap().id, "a");
-        assert_eq!(config("b").resolve(&db, "x").unwrap().id, "b");
+        let a = config("a").resolve(&db, "x@a").unwrap();
+        assert_eq!(a.provider.id, "a");
+        assert_eq!(a.upstream_model, "x");
+        let b = config("b").resolve(&db, "x@b").unwrap();
+        assert_eq!(b.provider.id, "b");
+        assert_eq!(b.upstream_model, "x");
+        assert_eq!(config("a").resolve(&db, "x").unwrap().provider.id, "a");
         assert_eq!(
             db.get_current_provider("codex").unwrap().as_deref(),
             Some("a")
@@ -322,7 +442,7 @@ mod tests {
         assert!(doc.get("model_context_window").is_none());
         assert_eq!(doc["other"]["keep"].as_bool(), Some(true));
         assert_eq!(
-            project_config(&projected, &config("b"), "http://127.0.0.1:15721/v1").unwrap(),
+            project_config(&projected, &config("a"), "http://127.0.0.1:15721/v1").unwrap(),
             projected
         );
         assert!(project_config("model_providers = 3", &config("a"), "http://localhost").is_err());
@@ -338,10 +458,78 @@ mod tests {
             .catalog(&IndexMap::from([("a".into(), a)]))
             .unwrap();
         let entry = &catalog["models"][0];
-        assert_eq!(entry["slug"], "x");
+        assert_eq!(entry["slug"], "x@a");
         assert_eq!(entry["context_window"], 64000);
         assert_eq!(entry["input_modalities"], json!(["text"]));
         assert_eq!(entry["default_reasoning_level"], "low");
         assert_eq!(entry["supported_reasoning_levels"][1]["effort"], "high");
+    }
+
+    #[test]
+    fn duplicate_models_use_hidden_route_ids_and_station_display_names() {
+        let providers = IndexMap::from([
+            ("a".into(), named_provider("a", "A站", None)),
+            ("b".into(), named_provider("b", "B站", None)),
+        ]);
+        let config = CodexModelRoutingConfig {
+            enabled: true,
+            models: vec![
+                ModelSelection {
+                    provider_id: "a".into(),
+                    model: "x".into(),
+                },
+                ModelSelection {
+                    provider_id: "b".into(),
+                    model: "x".into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(config.validate(&providers, true).is_ok());
+        let catalog = config.catalog(&providers).unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "x@a");
+        assert_eq!(catalog["models"][0]["display_name"], "A站 · x");
+        assert_eq!(catalog["models"][1]["slug"], "x@b");
+        assert_eq!(catalog["models"][1]["display_name"], "B站 · x");
+
+        let db = Database::memory().unwrap();
+        db.save_provider("codex", &providers["a"]).unwrap();
+        db.save_provider("codex", &providers["b"]).unwrap();
+        assert_eq!(config.resolve(&db, "x@b").unwrap().provider.id, "b");
+        assert!(config.resolve(&db, "x").is_err());
+    }
+
+    #[test]
+    fn visible_provider_and_model_combination_must_be_unique() {
+        let duplicate = IndexMap::from([
+            ("a".into(), named_provider("a", "A站", None)),
+            ("b".into(), named_provider("b", "A站", None)),
+        ]);
+        let config = CodexModelRoutingConfig {
+            models: vec![
+                ModelSelection {
+                    provider_id: "a".into(),
+                    model: "x".into(),
+                },
+                ModelSelection {
+                    provider_id: "b".into(),
+                    model: "x".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(config.validate(&duplicate, true).is_ok());
+        assert!(config.validate_visible_combinations(&duplicate).is_err());
+
+        let aliased = IndexMap::from([
+            ("a".into(), named_provider("a", "A站", None)),
+            ("b".into(), named_provider("b", "A站", Some("x-b"))),
+        ]);
+        assert!(config.validate(&aliased, true).is_ok());
+        assert!(config.validate_visible_combinations(&aliased).is_ok());
+        let catalog = config.catalog(&aliased).unwrap();
+        assert_eq!(catalog["models"][0]["display_name"], "x");
+        assert_eq!(catalog["models"][1]["display_name"], "x-b");
     }
 }

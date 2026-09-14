@@ -16,8 +16,10 @@ import { CodexModelRoutingDialog } from "./CodexModelRoutingDialog";
 
 export function CodexModelRoutingCard({
   providers,
+  onEditProvider,
 }: {
   providers: Record<string, Provider>;
+  onEditProvider: (provider: Provider) => void;
 }) {
   const { t } = useTranslation();
   const query = useCodexModelRouting();
@@ -117,6 +119,7 @@ export function CodexModelRoutingCard({
         onOpenChange={setOpen}
         providers={providers}
         active={active}
+        onEditProvider={onEditProvider}
       />
       <ConfirmDialog
         isOpen={confirmEnable}

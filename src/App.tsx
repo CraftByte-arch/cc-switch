@@ -1102,7 +1102,10 @@ function App() {
                     className="space-y-4"
                   >
                     {activeApp === "codex" && (
-                      <CodexModelRoutingCard providers={providers} />
+                      <CodexModelRoutingCard
+                        providers={providers}
+                        onEditProvider={setEditingProvider}
+                      />
                     )}
                     <ProviderList
                       providers={providers}

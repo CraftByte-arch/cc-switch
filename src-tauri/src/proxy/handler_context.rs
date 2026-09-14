@@ -48,8 +48,8 @@ pub struct RequestContext {
     pub current_provider_id: String,
     /// 请求中的模型名称
     pub request_model: String,
-    /// Snapshot of the routing mode for this request, including in-flight retries.
-    pub codex_model_routed: bool,
+    /// Real upstream model selected from the hidden Codex routing slug.
+    codex_routed_model: Option<String>,
     /// 实际发往上游的模型名（路由接管/模型映射后的真值，forward 成功后回填）。
     ///
     /// usage 归因的兜底顺序：上游响应回显 → outbound_model → request_model。
@@ -144,13 +144,16 @@ impl RequestContext {
             None
         };
         let codex_model_routed = routing.as_ref().is_some_and(|config| config.enabled);
+        let mut codex_routed_model = None;
         let providers = if let Some(config) = routing.filter(|config| config.enabled) {
             // The minimal model router has exactly one explicit station, never
             // the unrelated global failover queue.
             app_config.auto_failover_enabled = false;
-            vec![config
+            let resolved = config
                 .resolve(&state.db, &request_model)
-                .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?]
+                .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?;
+            codex_routed_model = Some(resolved.upstream_model);
+            vec![resolved.provider]
         } else {
             state
                 .provider_router
@@ -189,7 +192,7 @@ impl RequestContext {
             providers,
             current_provider_id,
             request_model,
-            codex_model_routed,
+            codex_routed_model,
             outbound_model: None,
             tag,
             app_type_str,
@@ -268,7 +271,7 @@ impl RequestContext {
             self.copilot_optimizer_config.clone(),
             max_retries,
         )
-        .with_codex_model_routing(self.codex_model_routed)
+        .with_codex_model_routing(self.codex_routed_model.clone())
     }
 
     /// 获取 Provider 列表（用于故障转移）
