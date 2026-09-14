@@ -14,6 +14,9 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: true
@@ -22,8 +25,6 @@ jobs:
   release:
     runs-on: ${{ matrix.os }}
     environment: release
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
