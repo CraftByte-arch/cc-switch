@@ -19,6 +19,19 @@ pub async fn get_codex_model_routing(
 }
 
 #[tauri::command]
+pub async fn get_codex_model_routing_capabilities(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::proxy::codex_model_routing::ModelRoutingCapability>, String> {
+    let providers = state
+        .db
+        .get_all_providers("codex")
+        .map_err(|e| e.to_string())?;
+    Ok(crate::proxy::codex_model_routing::model_capabilities(
+        &providers,
+    ))
+}
+
+#[tauri::command]
 pub async fn save_codex_model_routing(
     state: tauri::State<'_, AppState>,
     config: crate::proxy::codex_model_routing::CodexModelRoutingConfig,

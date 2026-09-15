@@ -12,6 +12,7 @@ AGENTS.md
 GEMINI.md
 /.claude
 /.codex
+/.codegraph
 /.gemini
 /.cc-switch
 /.idea

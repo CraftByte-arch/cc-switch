@@ -3,11 +3,22 @@ import { codexModelRoutingApi } from "@/lib/api/codexModelRouting";
 import { proxyKeys } from "./proxy";
 
 export const codexModelRoutingKey = ["codexModelRouting"] as const;
+export const codexModelRoutingCapabilitiesKey = [
+  "codexModelRoutingCapabilities",
+] as const;
 
 export function useCodexModelRouting() {
   return useQuery({
     queryKey: codexModelRoutingKey,
     queryFn: codexModelRoutingApi.get,
+  });
+}
+
+export function useCodexModelRoutingCapabilities(enabled = true) {
+  return useQuery({
+    queryKey: codexModelRoutingCapabilitiesKey,
+    queryFn: codexModelRoutingApi.getCapabilities,
+    enabled,
   });
 }
 
@@ -32,6 +43,9 @@ export function useSetCodexModelRoutingEnabled() {
       client.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
       client.invalidateQueries({ queryKey: proxyKeys.appConfig("codex") });
       client.invalidateQueries({ queryKey: ["providers", "codex"] });
+      client.invalidateQueries({
+        queryKey: codexModelRoutingCapabilitiesKey,
+      });
     },
   });
 }

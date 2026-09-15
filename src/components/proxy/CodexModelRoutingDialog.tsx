@@ -44,9 +44,11 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   useCodexModelRouting,
+  useCodexModelRoutingCapabilities,
   useSaveCodexModelRouting,
 } from "@/lib/query/codexModelRouting";
 import {
+  formatContextWindow,
   isModelRoutingProvider,
   modelRoutingCombinationKey,
   modelRoutingModelLabel,
@@ -63,13 +65,37 @@ const EMPTY: CodexModelRoutingConfig = {
   models: [],
 };
 
-function Reasoning({ model }: { model?: CodexCatalogModel }) {
+function ModelCapabilities({
+  model,
+  contextWindow,
+  contextLoading,
+}: {
+  model?: CodexCatalogModel;
+  contextWindow?: number | null;
+  contextLoading: boolean;
+}) {
   const { t } = useTranslation();
   const levels = Array.isArray(model?.reasoningLevels)
     ? model.reasoningLevels
     : [];
+  const formattedContextWindow = formatContextWindow(contextWindow);
   return (
     <span className="text-xs text-muted-foreground">
+      <span
+        title={
+          contextWindow ? `${contextWindow.toLocaleString()} tokens` : undefined
+        }
+      >
+        {t("codexRouting.effectiveContextWindow", {
+          defaultValue: "生效上下文",
+        })}
+        ：
+        {contextLoading
+          ? t("codexRouting.calculating", { defaultValue: "计算中…" })
+          : formattedContextWindow ||
+            t("codexRouting.unavailable", { defaultValue: "无法计算" })}
+      </span>
+      <span aria-hidden="true"> · </span>
       {t("codexRouting.reasoning", { defaultValue: "推理" })}：
       {levels.length
         ? levels.join(" / ")
@@ -85,6 +111,8 @@ function SelectedModel({
   entry,
   provider,
   model,
+  contextWindow,
+  contextLoading,
   displayName,
   conflict,
   index,
@@ -94,6 +122,8 @@ function SelectedModel({
   entry: CodexModelSelection;
   provider?: Provider;
   model?: CodexCatalogModel;
+  contextWindow?: number | null;
+  contextLoading: boolean;
   displayName: string;
   conflict: boolean;
   index: number;
@@ -136,7 +166,11 @@ function SelectedModel({
         </div>
         {model ? (
           <div className="mt-0.5">
-            <Reasoning model={model} />
+            <ModelCapabilities
+              model={model}
+              contextWindow={contextWindow}
+              contextLoading={contextLoading}
+            />
           </div>
         ) : (
           <span className="text-xs text-destructive">
@@ -177,6 +211,7 @@ export function CodexModelRoutingDialog({
 }) {
   const { t } = useTranslation();
   const query = useCodexModelRouting();
+  const capabilitiesQuery = useCodexModelRoutingCapabilities(open);
   const save = useSaveCodexModelRouting();
   const [draft, setDraft] = useState(EMPTY);
   const [baseline, setBaseline] = useState(EMPTY);
@@ -213,6 +248,16 @@ export function CodexModelRoutingDialog({
           models: modelRoutingOptions(provider),
         })),
     [providers],
+  );
+  const contextWindows = useMemo(
+    () =>
+      new Map(
+        (capabilitiesQuery.data ?? []).map((capability) => [
+          modelRoutingSelectionKey(capability),
+          capability.contextWindow,
+        ]),
+      ),
+    [capabilitiesQuery.data],
   );
   const routingIndex = useMemo(() => {
     const bySelection = new Map<
@@ -397,7 +442,7 @@ export function CodexModelRoutingDialog({
           <p className="text-sm text-muted-foreground">
             {t("codexRouting.description", {
               defaultValue:
-                "选择已有供应商的模型，合并成一套 Codex 菜单。地址、密钥、协议及推理能力均继承原供应商。",
+                "选择已有供应商的模型，合并成一套 Codex 菜单。地址、密钥、协议、推理能力及上下文限制均继承原供应商。",
             })}
           </p>
         </div>
@@ -557,6 +602,8 @@ export function CodexModelRoutingDialog({
                           disabled={pending}
                           provider={detail?.provider}
                           model={detail?.model}
+                          contextWindow={contextWindows.get(selectionKey)}
+                          contextLoading={capabilitiesQuery.isLoading}
                           displayName={displayName}
                           conflict={conflict}
                           onRemove={() =>
@@ -693,7 +740,11 @@ export function CodexModelRoutingDialog({
                             </span>
                           )}
                           <span className="ml-6 block">
-                            <Reasoning model={model} />
+                            <ModelCapabilities
+                              model={model}
+                              contextWindow={contextWindows.get(selectionKey)}
+                              contextLoading={capabilitiesQuery.isLoading}
+                            />
                           </span>
                         </button>
                       );

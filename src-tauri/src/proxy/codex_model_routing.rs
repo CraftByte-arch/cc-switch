@@ -20,6 +20,14 @@ pub struct ModelSelection {
     pub model: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRoutingCapability {
+    pub provider_id: String,
+    pub model: String,
+    pub context_window: Option<u64>,
+}
+
 impl ModelSelection {
     pub fn routed_model_id(&self) -> String {
         format!("{}@{}", self.model, self.provider_id)
@@ -87,6 +95,72 @@ pub fn has_model(provider: &Provider, model: &str) -> bool {
             rows.iter()
                 .any(|row| row.get("model").and_then(Value::as_str).map(str::trim) == Some(model))
         })
+}
+
+/// Preview the catalog values that routing would write without changing any
+/// saved configuration. A broken provider catalog only affects its own rows.
+pub fn model_capabilities(providers: &IndexMap<String, Provider>) -> Vec<ModelRoutingCapability> {
+    let mut capabilities = Vec::new();
+    for provider in providers
+        .values()
+        .filter(|provider| provider_is_eligible(provider))
+    {
+        let mut model_ids = Vec::new();
+        let mut seen = HashSet::new();
+        if let Some(rows) = provider
+            .settings_config
+            .pointer("/modelCatalog/models")
+            .and_then(Value::as_array)
+        {
+            for row in rows {
+                let Some(model) = row
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|model| !model.is_empty())
+                else {
+                    continue;
+                };
+                if seen.insert(model.to_string()) {
+                    model_ids.push(model.to_string());
+                }
+            }
+        }
+
+        let config = provider
+            .settings_config
+            .get("config")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let profile = super::providers::resolve_codex_catalog_tool_profile(provider);
+        let context_windows = crate::codex_config::codex_model_catalog_from_settings(
+            &provider.settings_config,
+            config,
+            profile,
+        )
+        .ok()
+        .flatten()
+        .and_then(|catalog| catalog.get("models").and_then(Value::as_array).cloned())
+        .map(|models| {
+            models
+                .into_iter()
+                .filter_map(|entry| {
+                    Some((
+                        entry.get("slug")?.as_str()?.to_string(),
+                        entry.get("context_window")?.as_u64()?,
+                    ))
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+        capabilities.extend(model_ids.into_iter().map(|model| ModelRoutingCapability {
+            provider_id: provider.id.clone(),
+            context_window: context_windows.get(&model).copied(),
+            model,
+        }));
+    }
+    capabilities
 }
 
 fn model_display_name(provider: &Provider, model: &str) -> String {
@@ -463,6 +537,64 @@ mod tests {
         assert_eq!(entry["input_modalities"], json!(["text"]));
         assert_eq!(entry["default_reasoning_level"], "low");
         assert_eq!(entry["supported_reasoning_levels"][1]["effort"], "high");
+    }
+
+    #[test]
+    fn capability_preview_uses_effective_catalog_context_windows() {
+        let mut explicit = provider("explicit");
+        explicit.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_responses".into()),
+            ..Default::default()
+        });
+
+        let mut inherited = provider("inherited");
+        inherited.settings_config["modelCatalog"]["models"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("contextWindow");
+        inherited.settings_config["config"] = json!(
+            "model = \"x\"\nmodel_provider = \"station\"\nmodel_context_window = 200000\n[model_providers.station]\nbase_url = \"https://example.test/v1\"\n"
+        );
+        inherited.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_responses".into()),
+            ..Default::default()
+        });
+
+        let mut fallback = provider("fallback");
+        fallback.settings_config["modelCatalog"]["models"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("contextWindow");
+        fallback.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_responses".into()),
+            ..Default::default()
+        });
+
+        let mut official = provider("official");
+        official.settings_config["modelCatalog"]["models"] = json!([{ "model": "deepseek-flash" }]);
+        official.settings_config["config"] = json!(
+            "model = \"deepseek-flash\"\nmodel_provider = \"deepseek\"\n[model_providers.deepseek]\nbase_url = \"https://api.deepseek.com\"\n"
+        );
+        official.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_responses".into()),
+            ..Default::default()
+        });
+
+        let capabilities = model_capabilities(&IndexMap::from([
+            (explicit.id.clone(), explicit),
+            (inherited.id.clone(), inherited),
+            (fallback.id.clone(), fallback),
+            (official.id.clone(), official),
+        ]));
+        let windows: HashMap<_, _> = capabilities
+            .into_iter()
+            .map(|capability| (capability.provider_id, capability.context_window))
+            .collect();
+
+        assert_eq!(windows["explicit"], Some(64_000));
+        assert_eq!(windows["inherited"], Some(200_000));
+        assert_eq!(windows["fallback"], Some(128_000));
+        assert_eq!(windows["official"], Some(1_048_576));
     }
 
     #[test]

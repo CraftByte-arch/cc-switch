@@ -6,6 +6,7 @@ import { CodexModelRoutingDialog } from "@/components/proxy/CodexModelRoutingDia
 const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   refetch: vi.fn(),
+  capabilitiesRefetch: vi.fn(),
 }));
 
 vi.mock("@/lib/query/codexModelRouting", () => ({
@@ -18,6 +19,15 @@ vi.mock("@/lib/query/codexModelRouting", () => ({
     isLoading: false,
     isError: false,
     refetch: mocks.refetch,
+  }),
+  useCodexModelRoutingCapabilities: () => ({
+    data: [
+      { providerId: "station-a", model: "gpt-5.4", contextWindow: 128000 },
+      { providerId: "station-b", model: "gpt-5.4", contextWindow: 1000000 },
+    ],
+    isLoading: false,
+    isError: false,
+    refetch: mocks.capabilitiesRefetch,
   }),
   useSaveCodexModelRouting: () => ({
     isPending: false,
@@ -43,6 +53,7 @@ describe("CodexModelRoutingDialog", () => {
   beforeEach(() => {
     mocks.mutateAsync.mockReset();
     mocks.refetch.mockReset();
+    mocks.capabilitiesRefetch.mockReset();
   });
 
   it("warns about visible-name conflicts and disables the second selection", () => {
@@ -67,12 +78,15 @@ describe("CodexModelRoutingDialog", () => {
     const modelButtons = screen.getAllByRole("button", {
       name: "A站 / gpt-5.4",
     });
+    expect(screen.getByText("生效上下文：128K")).toBeInTheDocument();
+    expect(screen.getByText("生效上下文：1M")).toBeInTheDocument();
     fireEvent.click(modelButtons[0]);
     const updatedModelButtons = screen.getAllByRole("button", {
       name: "A站 / gpt-5.4",
     });
     expect(updatedModelButtons[0]).toHaveAttribute("aria-pressed", "true");
     expect(updatedModelButtons[1]).toBeDisabled();
+    expect(screen.getAllByText("生效上下文：128K")).toHaveLength(2);
 
     const editButtons = screen.getAllByRole("button", {
       name: "编辑供应商 A站",

@@ -376,6 +376,12 @@ jobs:
 
             这是 `CraftByte-arch/cc-switch` 的 Codex 多供应商模型路由社区版本，不代表上游官方发布。
 
+            ### 本版更新
+
+            - Codex 模型路由的“管理模型”页面现在会显示每个模型启用后实际生效的上下文长度限制。
+            - 上下文长度复用最终模型目录的生成逻辑，正确继承模型单独配置、供应商 `model_context_window`、默认值以及厂商官方模型目录。
+            - 支持十进制和二进制整数的紧凑显示，例如 `128000 → 128K`、`278528 → 272K`、`1048576 → 1M`；悬停可查看精确 Token 数。
+
             ### 下载
 
             - **macOS**: `CC-Switch-${{ env.RELEASE_TAG }}-macOS.dmg`（推荐）或 `CC-Switch-${{ env.RELEASE_TAG }}-macOS.zip`（解压即用）

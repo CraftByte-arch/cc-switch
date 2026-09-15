@@ -1568,6 +1568,7 @@ pub fn run() {
             commands::update_global_proxy_config,
             commands::get_proxy_config_for_app,
             commands::get_codex_model_routing,
+            commands::get_codex_model_routing_capabilities,
             commands::save_codex_model_routing,
             commands::set_codex_model_routing_enabled,
             commands::update_proxy_config_for_app,

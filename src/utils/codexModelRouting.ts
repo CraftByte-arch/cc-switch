@@ -27,12 +27,23 @@ export function modelRoutingOptions(provider: Provider): CodexCatalogModel[] {
         ...row,
         model,
         displayName: row.displayName ?? row.display_name,
+        contextWindow: row.contextWindow ?? row.context_window,
         reasoningLevels: row.reasoningLevels ?? row.reasoning_levels,
         defaultReasoningLevel:
           row.defaultReasoningLevel ?? row.default_reasoning_level,
       },
     ];
   });
+}
+
+export function formatContextWindow(value: number | null | undefined): string {
+  if (!Number.isSafeInteger(value) || (value ?? 0) <= 0) return "";
+  const tokens = value as number;
+  if (tokens % 1_000_000 === 0) return `${tokens / 1_000_000}M`;
+  if (tokens % (1024 * 1024) === 0) return `${tokens / (1024 * 1024)}M`;
+  if (tokens % 1_000 === 0) return `${tokens / 1_000}K`;
+  if (tokens % 1024 === 0) return `${tokens / 1024}K`;
+  return tokens.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
 export function modelRoutingSelectionKey(

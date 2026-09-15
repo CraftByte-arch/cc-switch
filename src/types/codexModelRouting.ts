@@ -9,6 +9,12 @@ export interface CodexModelRoutingConfig {
   models: CodexModelSelection[];
 }
 
+export interface CodexModelRoutingCapability {
+  providerId: string;
+  model: string;
+  contextWindow: number | null;
+}
+
 export interface ModelRoutingSaveResult {
   config: CodexModelRoutingConfig;
   catalogChanged: boolean;

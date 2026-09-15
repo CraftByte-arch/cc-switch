@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CodexCatalogModel, Provider } from "@/types";
 import {
+  formatContextWindow,
   modelRoutingCombinationKey,
   modelRoutingModelLabel,
   modelRoutingOptions,
@@ -49,18 +50,31 @@ describe("codex model routing helpers", () => {
     ).not.toBe(modelRoutingCombinationKey(a, model));
   });
 
-  it("normalizes snake-case display aliases from provider catalogs", () => {
+  it("normalizes snake-case catalog capabilities", () => {
     const [model] = modelRoutingOptions(
       provider("station-a", "A站", [
         {
           model: "gpt-5.4",
           display_name: "GPT 5.4 Fast",
+          context_window: 262144,
           reasoning_levels: ["low", "high"],
         },
       ]),
     );
 
     expect(model.displayName).toBe("GPT 5.4 Fast");
+    expect(model.contextWindow).toBe(262144);
     expect(model.reasoningLevels).toEqual(["low", "high"]);
+  });
+
+  it("formats effective context windows compactly", () => {
+    expect(formatContextWindow(64_000)).toBe("64K");
+    expect(formatContextWindow(128_000)).toBe("128K");
+    expect(formatContextWindow(1_000_000)).toBe("1M");
+    expect(formatContextWindow(278_528)).toBe("272K");
+    expect(formatContextWindow(262_144)).toBe("256K");
+    expect(formatContextWindow(1_048_576)).toBe("1M");
+    expect(formatContextWindow(250_001)).toBe("250,001");
+    expect(formatContextWindow(null)).toBe("");
   });
 });
