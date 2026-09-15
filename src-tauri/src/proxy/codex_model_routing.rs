@@ -45,6 +45,8 @@ pub struct CodexModelRoutingConfig {
     /// Mode preference. Actual activation also requires Codex takeover.
     pub enabled: bool,
     pub provider_name: String,
+    /// Add provider names only for duplicate model labels, or for every model.
+    pub smart_model_names: bool,
     /// Ordered, unique provider/model routes; first entry is the initial default.
     pub models: Vec<ModelSelection>,
 }
@@ -54,6 +56,7 @@ impl Default for CodexModelRoutingConfig {
         Self {
             enabled: false,
             provider_name: "CC Switch Router".into(),
+            smart_model_names: true,
             models: Vec::new(),
         }
     }
@@ -309,7 +312,9 @@ impl CodexModelRoutingConfig {
                     AppError::Config(format!("无法生成模型目录：{}", selection.model))
                 })?;
             let model_name = model_display_name(provider, &selection.model);
-            let display_name = if display_name_counts.get(&model_name).copied().unwrap_or(0) > 1 {
+            let display_name = if !self.smart_model_names
+                || display_name_counts.get(&model_name).copied().unwrap_or(0) > 1
+            {
                 format!("{} · {}", provider.name.trim(), model_name)
             } else {
                 model_name
@@ -465,6 +470,13 @@ mod tests {
     fn defaults_and_reference_roundtrip() {
         let db = Database::memory().unwrap();
         assert!(!db.get_codex_model_routing().unwrap().enabled);
+        let legacy: CodexModelRoutingConfig = serde_json::from_value(json!({
+            "enabled": false,
+            "providerName": "Legacy Router",
+            "models": []
+        }))
+        .unwrap();
+        assert!(legacy.smart_model_names);
         db.save_codex_model_routing(&config("a")).unwrap();
         assert_eq!(db.get_codex_model_routing().unwrap(), config("a"));
         db.set_setting(SETTINGS_KEY, "{broken").unwrap();
@@ -630,6 +642,23 @@ mod tests {
         db.save_provider("codex", &providers["b"]).unwrap();
         assert_eq!(config.resolve(&db, "x@b").unwrap().provider.id, "b");
         assert!(config.resolve(&db, "x").is_err());
+    }
+
+    #[test]
+    fn smart_model_names_can_force_provider_prefix_for_single_models() {
+        let providers = IndexMap::from([("a".into(), named_provider("a", "A站", None))]);
+        let smart = config("a");
+        assert_eq!(
+            smart.catalog(&providers).unwrap()["models"][0]["display_name"],
+            "x"
+        );
+
+        let mut always_prefixed = smart;
+        always_prefixed.smart_model_names = false;
+        assert_eq!(
+            always_prefixed.catalog(&providers).unwrap()["models"][0]["display_name"],
+            "A站 · x"
+        );
     }
 
     #[test]

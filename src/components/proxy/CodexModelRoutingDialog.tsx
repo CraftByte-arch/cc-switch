@@ -35,6 +35,7 @@ import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
@@ -62,6 +63,7 @@ import { cn } from "@/lib/utils";
 const EMPTY: CodexModelRoutingConfig = {
   enabled: false,
   providerName: "CC Switch Router",
+  smartModelNames: true,
   models: [],
 };
 
@@ -484,6 +486,37 @@ export function CodexModelRoutingDialog({
               })}
             </p>
           </div>
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-muted/20 px-4 py-3">
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor="codex-router-smart-model-names">
+                {t("codexRouting.smartModelNames", {
+                  defaultValue: "智能模型名称显示",
+                })}
+              </Label>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {draft.smartModelNames
+                  ? t("codexRouting.smartModelNamesEnabled", {
+                      defaultValue:
+                        "仅在多个已启用模型名称相同时添加供应商前缀，例如“A站 · Grok 4.5”。",
+                    })
+                  : t("codexRouting.smartModelNamesDisabled", {
+                      defaultValue:
+                        "所有模型始终显示供应商前缀，例如“A站 · Grok 4.5”。",
+                    })}
+              </p>
+            </div>
+            <Switch
+              id="codex-router-smart-model-names"
+              checked={draft.smartModelNames}
+              disabled={pending || !initialized}
+              onCheckedChange={(smartModelNames) =>
+                setDraft({ ...draft, smartModelNames })
+              }
+              aria-label={t("codexRouting.smartModelNames", {
+                defaultValue: "智能模型名称显示",
+              })}
+            />
+          </div>
           {routingIndex.conflicts.length > 0 && (
             <div
               role="status"
@@ -585,9 +618,10 @@ export function CodexModelRoutingDialog({
                         (selectedState.modelNameCounts.get(
                           detail?.modelName ?? entry.model,
                         ) ?? 0) > 1;
-                      const displayName = duplicateModelName
-                        ? `${detail?.provider?.name ?? entry.providerId} · ${detail?.modelName ?? entry.model}`
-                        : (detail?.modelName ?? entry.model);
+                      const displayName =
+                        !draft.smartModelNames || duplicateModelName
+                          ? `${detail?.provider?.name ?? entry.providerId} · ${detail?.modelName ?? entry.model}`
+                          : (detail?.modelName ?? entry.model);
                       const conflict = Boolean(
                         detail?.combinationKey &&
                           (selectedState.combinationCounts.get(

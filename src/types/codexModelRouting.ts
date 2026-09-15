@@ -6,6 +6,7 @@ export interface CodexModelSelection {
 export interface CodexModelRoutingConfig {
   enabled: boolean;
   providerName: string;
+  smartModelNames: boolean;
   models: CodexModelSelection[];
 }
 

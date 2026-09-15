@@ -14,6 +14,7 @@ vi.mock("@/lib/query/codexModelRouting", () => ({
     data: {
       enabled: false,
       providerName: "CC Switch Router",
+      smartModelNames: true,
       models: [],
     },
     isLoading: false,
@@ -87,6 +88,19 @@ describe("CodexModelRoutingDialog", () => {
     expect(updatedModelButtons[0]).toHaveAttribute("aria-pressed", "true");
     expect(updatedModelButtons[1]).toBeDisabled();
     expect(screen.getAllByText("生效上下文：128K")).toHaveLength(2);
+
+    const smartNames = screen.getByRole("switch", {
+      name: "智能模型名称显示",
+    });
+    expect(smartNames).toBeChecked();
+    expect(
+      screen.getByText("gpt-5.4", { selector: "div" }),
+    ).toBeInTheDocument();
+    fireEvent.click(smartNames);
+    expect(smartNames).not.toBeChecked();
+    expect(
+      screen.getByText("A站 · gpt-5.4", { selector: "div" }),
+    ).toBeInTheDocument();
 
     const editButtons = screen.getAllByRole("button", {
       name: "编辑供应商 A站",
