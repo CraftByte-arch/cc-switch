@@ -915,7 +915,8 @@
     "opencode": "OpenCode",
     "openclaw": "OpenClaw",
     "hermes": "Hermes",
-    "pi": "Pi"
+    "pi": "Pi",
+    "mcode": "MiniMax Code"
   },
   "pi": {
     "empty": {
@@ -1723,7 +1724,8 @@
       "gemini": "Gemini",
       "opencode": "OpenCode",
       "grokbuild": "Grok Build",
-      "pi": "Pi"
+      "pi": "Pi",
+      "mcode": "MiniMax Code"
     },
     "rawInputLabel": "原始",
     "sessionSync": {
@@ -2029,7 +2031,8 @@
         "grokbuild": "Grok Build",
         "opencode": "OpenCode",
         "openclaw": "OpenClaw",
-        "hermes": "Hermes"
+        "hermes": "Hermes",
+        "mcode": "MiniMax Code"
       }
     },
     "userLevelPath": "使用者級 MCP 設定路徑",

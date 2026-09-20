@@ -20,6 +20,7 @@ mod init_status;
 mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;
+mod mcode_config;
 mod mcp;
 mod model_capabilities;
 mod openclaw_config;
@@ -989,6 +990,7 @@ pub fn run() {
                     crate::app_config::AppType::OpenClaw,
                     crate::app_config::AppType::Hermes,
                     crate::app_config::AppType::Pi,
+                    crate::app_config::AppType::Mcode,
                 ] {
                     match crate::services::prompt::PromptService::import_from_file_on_first_launch(
                         &app_state,
