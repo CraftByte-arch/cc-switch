@@ -1,3 +1,4 @@
+import { requestCodexMaintenance } from "@/lib/codexMaintenance";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
@@ -59,7 +60,8 @@ export function useSetProxyTakeoverForApp() {
   return useMutation({
     mutationFn: ({ appType, enabled }: { appType: string; enabled: boolean }) =>
       proxyApi.setProxyTakeoverForApp(appType, enabled),
-    onSuccess: () => {
+    onSuccess: (_result, { appType }) => {
+      if (appType === "codex") requestCodexMaintenance();
       queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
     },
   });

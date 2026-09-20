@@ -382,6 +382,30 @@ pub fn project_config(
     if config.models.is_empty() {
         return Err(AppError::InvalidInput("请至少选择一个 Codex 模型".into()));
     }
+    // Repair the legacy partial desktop table on routing activation. Preserve
+    // every explicit user selection (even []), rather than forcing all efforts
+    // on subsequent refreshes. These are picker preferences, not a claim that
+    // every routed model supports each effort; model capabilities stay intact.
+    if doc.get("desktop").is_none() {
+        doc["desktop"] = toml_edit::table();
+    }
+    let desktop = doc["desktop"]
+        .as_table_like_mut()
+        .ok_or_else(|| AppError::Config("Codex desktop 必须是 TOML 表".into()))?;
+    if desktop.get("enabled-reasoning-efforts").is_none() {
+        let efforts: toml_edit::Array = [
+            "persistent",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra",
+        ]
+        .into_iter()
+        .collect();
+        desktop.insert("enabled-reasoning-efforts", toml_edit::value(efforts));
+    }
     let current = doc.get("model").and_then(|item| item.as_str());
     let selected = current
         .and_then(|model| {
@@ -533,6 +557,38 @@ mod tests {
         );
         assert!(project_config("model_providers = 3", &config("a"), "http://localhost").is_err());
     }
+    #[test]
+    fn project_config_preserves_codex_desktop_preferences() {
+        let input = r#"model = "x"
+model_reasoning_effort = "max"
+
+[desktop]
+followUpQueueMode = "queue"
+enabled-reasoning-efforts = ["low", "high", "max", "ultra"]
+
+[model_providers.custom]
+name = "Old"
+"#;
+
+        let projected = project_config(input, &config("a"), "http://127.0.0.1:15721/v1").unwrap();
+        let doc: toml::Value = toml::from_str(&projected).unwrap();
+
+        assert_eq!(doc["desktop"]["followUpQueueMode"].as_str(), Some("queue"));
+        assert_eq!(
+            doc["desktop"]["enabled-reasoning-efforts"].as_array(),
+            Some(&vec![
+                toml::Value::String("low".into()),
+                toml::Value::String("high".into()),
+                toml::Value::String("max".into()),
+                toml::Value::String("ultra".into()),
+            ])
+        );
+        assert!(
+            doc.get("model_reasoning_effort").is_none(),
+            "routing may reset the per-model effort when the routed model identity changes"
+        );
+    }
+
     #[test]
     fn merged_catalog_preserves_reasoning_and_capabilities() {
         let mut a = provider("a");

@@ -37,6 +37,7 @@ interface ProviderActionsProps {
   isInConfig?: boolean;
   isTesting?: boolean;
   isProxyTakeover?: boolean;
+  isCodexModelRoutingActive?: boolean;
   isOmo?: boolean;
   onSwitch: () => void;
   onEdit: () => void;
@@ -79,6 +80,7 @@ export function ProviderActions({
   isInConfig = false,
   isTesting,
   isProxyTakeover = false,
+  isCodexModelRoutingActive = false,
   isOmo = false,
   onSwitch,
   onEdit,
@@ -116,7 +118,9 @@ export function ProviderActions({
   const piStateChangeHint = t("pi.current.stateUnavailableHint");
 
   const handleMainButtonClick = () => {
-    if (isOmo) {
+    if (isCodexModelRoutingActive) {
+      onSwitch();
+    } else if (isOmo) {
       if (isCurrent) {
         onDisableOmo?.();
       } else {
@@ -141,6 +145,24 @@ export function ProviderActions({
   };
 
   const getMainButtonState = (): MainButtonState => {
+    if (isCodexModelRoutingActive) {
+      return {
+        disabled: isCurrent,
+        variant: isCurrent ? ("secondary" as const) : ("default" as const),
+        className: isCurrent
+          ? "bg-gray-200 text-muted-foreground hover:bg-gray-200 hover:text-muted-foreground dark:bg-gray-700 dark:hover:bg-gray-700"
+          : "bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700",
+        icon: isCurrent ? (
+          <Check className="h-4 w-4" />
+        ) : (
+          <Play className="h-4 w-4" />
+        ),
+        text: isCurrent
+          ? t("provider.routingDefault", { defaultValue: "路由关闭后默认" })
+          : t("provider.setRoutingDefault", { defaultValue: "设为关闭后默认" }),
+      };
+    }
+
     if (isOmo) {
       if (isCurrent) {
         return {
@@ -263,7 +285,7 @@ export function ProviderActions({
     !isReadOnly &&
     (appId === "pi"
       ? !isStateChangeProtected
-      : isOmo || isAdditiveMode
+      : isOmo || isAdditiveMode || isCodexModelRoutingActive
         ? true
         : !isCurrent);
   const readOnlyHint = t("provider.managedByHermesHint", {
@@ -368,7 +390,7 @@ export function ProviderActions({
       <span
         title={buttonState.title}
         className={cn(
-          "inline-flex",
+          "inline-flex shrink-0",
           buttonState.disabled && "cursor-not-allowed",
         )}
       >
@@ -377,7 +399,11 @@ export function ProviderActions({
           variant={buttonState.variant}
           onClick={handleMainButtonClick}
           disabled={buttonState.disabled}
-          className={cn("w-[4.5rem] px-2.5", buttonState.className)}
+          className={cn(
+            "shrink-0 px-2.5",
+            isCodexModelRoutingActive ? "w-auto" : "w-[4.5rem]",
+            buttonState.className,
+          )}
         >
           {buttonState.icon}
           {buttonState.text}

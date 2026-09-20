@@ -1,5 +1,6 @@
 // 配置相关 API
 import { invoke } from "@tauri-apps/api/core";
+import { requestCodexMaintenance } from "@/lib/codexMaintenance";
 
 export type AppType = "claude" | "codex" | "gemini" | "omo" | "omo_slim";
 
@@ -45,7 +46,11 @@ export async function setCommonConfigSnippet(
   appType: AppType,
   snippet: string,
 ): Promise<void> {
-  return invoke("set_common_config_snippet", { appType, snippet });
+  const liveChanged = await invoke<boolean>("set_common_config_snippet", {
+    appType,
+    snippet,
+  });
+  if (appType === "codex" && liveChanged) requestCodexMaintenance();
 }
 
 /**

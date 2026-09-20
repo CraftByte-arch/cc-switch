@@ -41,6 +41,33 @@ const withJson = async <T>(request: Request): Promise<T> => {
 const success = <T>(payload: T) => HttpResponse.json(payload as any);
 
 export const handlers = [
+  http.post(`${TAURI_ENDPOINT}/get_codex_maintenance_status`, () =>
+    success({
+      supported: true,
+      appName: "Codex",
+      repairTarget: "custom",
+      repairError: null,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_codex_model_routing`, () =>
+    success({
+      enabled: false,
+      providerName: "CC Switch Router",
+      smartModelNames: true,
+      models: [],
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_codex_repair_backups`, () =>
+    success({
+      count: 0,
+      bytes: 0,
+      protectedCount: 0,
+      skippedEntries: 0,
+      path: "/fixture/backups/codex-session-visibility",
+      snapshot: "empty-fixture",
+    }),
+  ),
+
   http.get(MODELS_DEV_API_URL, () => success({})),
   http.post(`${TAURI_ENDPOINT}/get_migration_result`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/get_skills_migration_result`, () =>

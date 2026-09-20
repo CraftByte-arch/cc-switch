@@ -1009,6 +1009,54 @@ pub fn delete_codex_provider_config(
     Ok(())
 }
 
+/// Desktop preferences belong to the local Codex UI, not a provider or a
+/// takeover backup. Current values win, but a partial current table must not
+/// discard missing preferences supplied by a replacement or routing projection.
+/// Explicit values, including an empty reasoning-effort list, remain authoritative.
+fn preserve_desktop_preferences(existing: &str, incoming: &str) -> Result<String, AppError> {
+    let path = get_codex_config_path();
+    let current = match existing.parse::<DocumentMut>() {
+        Ok(current) => current,
+        Err(_) => {
+            // A restore must still be able to repair malformed live TOML.
+            // Never include config text (which can contain tokens) in this log.
+            log::warn!("Cannot preserve desktop preferences from malformed Codex config; using replacement config");
+            return Ok(incoming.to_string());
+        }
+    };
+    let Some(desktop) = current.get("desktop") else {
+        return Ok(incoming.to_string());
+    };
+    if desktop.as_table_like().is_none() {
+        return Err(AppError::Config(
+            "Codex desktop must be a TOML table".into(),
+        ));
+    }
+    let mut target = incoming.parse::<DocumentMut>().map_err(|e| {
+        AppError::Config(format!(
+            "Invalid Codex config.toml at {}: {e}",
+            path.display()
+        ))
+    })?;
+    let incoming_efforts = target
+        .get("desktop")
+        .and_then(|item| item.as_table_like())
+        .and_then(|table| table.get("enabled-reasoning-efforts"))
+        .cloned();
+    target["desktop"] = desktop.clone();
+    let merged = target["desktop"]
+        .as_table_like_mut()
+        .expect("validated desktop table");
+    // Only recover the known preference. Do not resurrect arbitrary settings
+    // intentionally removed by Codex from the current desktop table.
+    if merged.get("enabled-reasoning-efforts").is_none() {
+        if let Some(efforts) = incoming_efforts {
+            merged.insert("enabled-reasoning-efforts", efforts);
+        }
+    }
+    Ok(target.to_string())
+}
+
 /// 原子写 Codex 的 `auth.json` 与 `config.toml`，在第二步失败时回滚第一步
 pub fn write_codex_live_atomic(
     auth: &Value,
@@ -1034,10 +1082,8 @@ pub fn write_codex_live_atomic(
     };
 
     // 准备写入内容
-    let cfg_text = match config_text_opt {
-        Some(s) => s.to_string(),
-        None => String::new(),
-    };
+    let cfg_text =
+        preserve_desktop_preferences(&read_codex_config_text()?, config_text_opt.unwrap_or(""))?;
     if !cfg_text.trim().is_empty() {
         toml::from_str::<toml::Table>(&cfg_text).map_err(|e| AppError::toml(&config_path, e))?;
     }
@@ -1110,10 +1156,8 @@ pub(crate) fn is_custom_codex_model_provider_id(id: &str) -> bool {
 /// should not overwrite the user's ChatGPT login cache.
 pub fn write_codex_live_config_atomic(config_text_opt: Option<&str>) -> Result<(), AppError> {
     let config_path = get_codex_config_path();
-    let cfg_text = match config_text_opt {
-        Some(config_text) => config_text.to_string(),
-        None => String::new(),
-    };
+    let cfg_text =
+        preserve_desktop_preferences(&read_codex_config_text()?, config_text_opt.unwrap_or(""))?;
 
     if !cfg_text.trim().is_empty() {
         toml::from_str::<toml::Table>(&cfg_text).map_err(|e| AppError::toml(&config_path, e))?;
@@ -4291,6 +4335,36 @@ mod tests {
     use serde_json::json;
     use serial_test::serial;
     use std::ffi::OsString;
+
+    #[test]
+    fn partial_desktop_keeps_incoming_efforts_but_explicit_live_efforts_win() {
+        let incoming = "[desktop]\nfollowUpQueueMode = \"other\"\nenabled-reasoning-efforts = [\"low\", \"max\"]\n";
+        for (suffix, expected) in [
+            ("", json!(["low", "max"])),
+            ("enabled-reasoning-efforts = []\n", json!([])),
+            ("enabled-reasoning-efforts = [\"high\"]\n", json!(["high"])),
+        ] {
+            let current = format!("[desktop]\nfollowUpQueueMode = \"queue\"\n{suffix}");
+            let merged = preserve_desktop_preferences(&current, incoming).unwrap();
+            let doc: toml::Value = toml::from_str(&merged).unwrap();
+            assert_eq!(doc["desktop"]["followUpQueueMode"].as_str(), Some("queue"));
+            assert_eq!(
+                serde_json::to_value(&doc["desktop"]["enabled-reasoning-efforts"]).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_preservation_allows_repair_and_does_not_invent_preferences() {
+        let replacement = "model = \"restored\"\n";
+        for existing in ["", "model = \"old\"\n", "model_provider = ["] {
+            assert_eq!(
+                preserve_desktop_preferences(existing, replacement).unwrap(),
+                replacement
+            );
+        }
+    }
 
     #[test]
     fn codex_id_token_user_identity_requires_a_nonempty_subject() {

@@ -68,6 +68,8 @@ interface ProviderListProps {
   isLoading?: boolean;
   isProxyRunning?: boolean; // 代理服务运行状态
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
+  isCodexModelRoutingActive?: boolean;
+  codexRoutingUsageByProvider?: Record<string, number>;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider, modelId?: string) => void; // OpenClaw: set as default model
 }
@@ -90,6 +92,8 @@ export function ProviderList({
   isLoading = false,
   isProxyRunning = false,
   isProxyTakeover = false,
+  isCodexModelRoutingActive = false,
+  codexRoutingUsageByProvider = {},
   activeProviderId,
   onSetAsDefault,
 }: ProviderListProps) {
@@ -486,6 +490,12 @@ export function ProviderList({
                 isTesting={isChecking(provider.id)}
                 isProxyRunning={supportsFailover && isProxyRunning}
                 isProxyTakeover={supportsFailover && isProxyTakeover}
+                isCodexModelRoutingActive={
+                  appId === "codex" && isCodexModelRoutingActive
+                }
+                codexRoutingModelCount={
+                  codexRoutingUsageByProvider[provider.id] ?? 0
+                }
                 isAutoFailoverEnabled={isFailoverModeActive}
                 failoverPriority={getFailoverPriority(provider.id)}
                 isInFailoverQueue={isInFailoverQueue(provider.id)}
@@ -643,6 +653,8 @@ interface SortableProviderCardProps {
   isTesting: boolean;
   isProxyRunning: boolean;
   isProxyTakeover: boolean;
+  isCodexModelRoutingActive: boolean;
+  codexRoutingModelCount: number;
   isAutoFailoverEnabled: boolean;
   failoverPriority?: number;
   isInFailoverQueue: boolean;
@@ -676,6 +688,8 @@ function SortableProviderCard({
   isTesting,
   isProxyRunning,
   isProxyTakeover,
+  isCodexModelRoutingActive,
+  codexRoutingModelCount,
   isAutoFailoverEnabled,
   failoverPriority,
   isInFailoverQueue,
@@ -725,6 +739,8 @@ function SortableProviderCard({
         isTesting={isTesting}
         isProxyRunning={isProxyRunning}
         isProxyTakeover={isProxyTakeover}
+        isCodexModelRoutingActive={isCodexModelRoutingActive}
+        codexRoutingModelCount={codexRoutingModelCount}
         dragHandleProps={{
           attributes,
           listeners,

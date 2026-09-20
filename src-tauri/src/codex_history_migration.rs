@@ -36,7 +36,7 @@ const STATE_DB_ID_CHUNK: usize = 500;
 /// 关闭还原可能在毫秒级先后被触发，对同一批 jsonl / state DB 双向改写。
 static CODEX_OFFICIAL_HISTORY_OP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn lock_codex_official_history_op() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn lock_codex_official_history_op() -> std::sync::MutexGuard<'static, ()> {
     CODEX_OFFICIAL_HISTORY_OP_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

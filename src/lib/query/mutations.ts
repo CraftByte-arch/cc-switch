@@ -1,3 +1,8 @@
+import {
+  requestCodexMaintenance,
+  codexRoutingOwnsLive,
+  providerAffectsLiveCodex,
+} from "@/lib/codexMaintenance";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -16,12 +21,29 @@ import { proxyKeys } from "@/lib/query/proxy";
 import { usageKeys } from "@/lib/query/usage";
 import { invalidatePiProviderCaches } from "@/lib/query/pi";
 import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
+import {
+  codexModelRoutingCapabilitiesKey,
+  codexModelRoutingKey,
+} from "@/lib/query/codexModelRouting";
 
 export const useAddProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 
   return useMutation({
+    onMutate: () => {
+      const current = queryClient.getQueryData<{ currentProviderId: string }>([
+        "providers",
+        "codex",
+      ]);
+      return {
+        promptRestart:
+          appId === "codex" &&
+          current !== undefined &&
+          !current.currentProviderId &&
+          !codexRoutingOwnsLive(queryClient),
+      };
+    },
     mutationFn: async (
       providerInput: Omit<Provider, "id"> & {
         providerKey?: string;
@@ -92,8 +114,15 @@ export const useAddProviderMutation = (appId: AppId) => {
       await providersApi.add(newProvider, appId, addToLive);
       return newProvider;
     },
-    onSuccess: async () => {
+    onSuccess: async (_provider, _input, context) => {
+      if (context?.promptRestart) requestCodexMaintenance();
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      if (appId === "codex") {
+        await queryClient.invalidateQueries({ queryKey: codexModelRoutingKey });
+        await queryClient.invalidateQueries({
+          queryKey: codexModelRoutingCapabilitiesKey,
+        });
+      }
 
       if (appId === "opencode") {
         await queryClient.invalidateQueries({
@@ -165,6 +194,10 @@ export const useUpdateProviderMutation = (appId: AppId) => {
   const { t } = useTranslation();
 
   return useMutation({
+    onMutate: ({ provider }) => ({
+      promptRestart:
+        appId === "codex" && providerAffectsLiveCodex(queryClient, provider.id),
+    }),
     mutationFn: async ({
       provider,
       originalId,
@@ -175,8 +208,15 @@ export const useUpdateProviderMutation = (appId: AppId) => {
       await providersApi.update(provider, appId, originalId);
       return provider;
     },
-    onSuccess: async (provider, variables) => {
+    onSuccess: async (provider, variables, context) => {
+      if (context?.promptRestart) requestCodexMaintenance();
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      if (appId === "codex") {
+        await queryClient.invalidateQueries({ queryKey: codexModelRoutingKey });
+        await queryClient.invalidateQueries({
+          queryKey: codexModelRoutingCapabilitiesKey,
+        });
+      }
       await queryClient.invalidateQueries({
         queryKey: usageKeys.script(provider.id, appId),
       });
@@ -230,11 +270,22 @@ export const useDeleteProviderMutation = (appId: AppId) => {
   const { t } = useTranslation();
 
   return useMutation({
+    onMutate: (id: string) => ({
+      promptRestart:
+        appId === "codex" && providerAffectsLiveCodex(queryClient, id),
+    }),
     mutationFn: async (providerId: string) => {
       await providersApi.delete(providerId, appId);
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, _id, context) => {
+      if (context?.promptRestart) requestCodexMaintenance();
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      if (appId === "codex") {
+        await queryClient.invalidateQueries({ queryKey: codexModelRoutingKey });
+        await queryClient.invalidateQueries({
+          queryKey: codexModelRoutingCapabilitiesKey,
+        });
+      }
 
       if (appId === "opencode") {
         await queryClient.invalidateQueries({
@@ -306,10 +357,14 @@ export const useSwitchProviderMutation = (appId: AppId) => {
   const { t } = useTranslation();
 
   return useMutation({
+    onMutate: () => ({
+      promptRestart: appId === "codex" && !codexRoutingOwnsLive(queryClient),
+    }),
     mutationFn: async (providerId: string): Promise<SwitchResult> => {
       return await providersApi.switch(providerId, appId);
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, _id, context) => {
+      if (context?.promptRestart) requestCodexMaintenance();
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
       if (appId === "claude-desktop") {
         await queryClient.invalidateQueries({ queryKey: proxyKeys.status });

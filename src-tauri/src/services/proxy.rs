@@ -2,6 +2,7 @@
 //!
 //! 提供代理服务器的启动、停止和配置管理
 
+use self::codex_model_routing::RouterFiles;
 use crate::app_config::AppType;
 use crate::config::{get_claude_settings_path, read_json_file, write_json_file};
 use crate::database::Database;
@@ -739,6 +740,10 @@ impl ProxyService {
         .settings_config;
         if let Some(existing_live) = existing_live.as_ref() {
             Self::preserve_toml_mcp_servers_from_existing_config(
+                &mut effective_settings,
+                existing_live,
+            )?;
+            Self::preserve_codex_desktop_preferences_from_existing_config(
                 &mut effective_settings,
                 existing_live,
             )?;
@@ -2914,6 +2919,10 @@ impl ProxyService {
                     &mut effective_settings,
                     existing_value,
                 )?;
+                Self::preserve_codex_desktop_preferences_from_existing_config(
+                    &mut effective_settings,
+                    existing_value,
+                )?;
                 if let Some(account_id) = clear_codex_auth_for_account {
                     Self::clear_codex_auth_in_backup(
                         &mut effective_settings,
@@ -3003,6 +3012,116 @@ impl ProxyService {
 
         log::info!("已更新 {app_type} Live 备份（热切换）");
         Ok(())
+    }
+
+    /// Update Codex's ordinary/default provider while model routing owns the
+    /// live config. This intentionally changes only the persisted fallback
+    /// target; it must never rewrite the routed config.toml or model catalog.
+    pub(crate) async fn set_codex_default_provider_while_routing_inner(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), String> {
+        if !self.codex_model_routing_enabled()? {
+            return Err("Codex 模型路由未启用".into());
+        }
+        let provider = self
+            .db
+            .get_provider_by_id(provider_id, "codex")
+            .map_err(|e| format!("读取供应商失败: {e}"))?
+            .ok_or_else(|| format!("供应商不存在: {provider_id}"))?;
+        let previous_local = crate::settings::get_current_provider(&AppType::Codex);
+        if let Err(error) =
+            crate::settings::set_current_provider(&AppType::Codex, Some(provider_id))
+        {
+            return Err(format!("更新本地默认供应商失败: {error}"));
+        }
+        if let Err(error) = self.db.set_current_provider("codex", provider_id) {
+            if let Err(rollback_error) =
+                crate::settings::set_current_provider(&AppType::Codex, previous_local.as_deref())
+            {
+                log::error!("恢复本地 Codex 默认供应商失败: {rollback_error}");
+            }
+            return Err(format!("更新默认供应商失败: {error}"));
+        }
+
+        log::info!(
+            "Codex 模型路由开启：已将关闭路由后的默认供应商设置为 {} ({})，未改写 Live 配置",
+            provider.name,
+            provider.id
+        );
+        Ok(())
+    }
+
+    /// Remove all route entries belonging to a provider before deleting it.
+    /// Returns the previous routing config so the caller can restore it if the
+    /// provider deletion itself fails. The caller owns the Codex switch lock.
+    pub(crate) async fn remove_codex_provider_references_inner(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<crate::proxy::codex_model_routing::CodexModelRoutingConfig>, String> {
+        let old = self.codex_model_routing_config()?;
+        if !old.references_provider(provider_id) {
+            return Ok(None);
+        }
+        let mut next = old.clone();
+        next.models.retain(|entry| entry.provider_id != provider_id);
+        let providers = self
+            .db
+            .get_all_providers("codex")
+            .map_err(|e| e.to_string())?;
+        let takeover = self
+            .db
+            .get_proxy_config_for_app("codex")
+            .await
+            .map_err(|e| e.to_string())?
+            .enabled;
+        let active = old.enabled && takeover;
+        next.validate(&providers, active)
+            .map_err(|e| e.to_string())?;
+        next.validate_visible_combinations(&providers)
+            .map_err(|e| e.to_string())?;
+
+        let files = if active {
+            Some(RouterFiles::capture().map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        if active {
+            if let Err(error) = self.project_codex_model_routing(&next, &providers).await {
+                return Err(error);
+            }
+        }
+        if let Err(error) = self.db.save_codex_model_routing(&next) {
+            if let Some(files) = files {
+                files
+                    .restore()
+                    .map_err(|rollback| format!("{error}; 回滚路由文件失败: {rollback}"))?;
+            }
+            return Err(error.to_string());
+        }
+        Ok(Some(old))
+    }
+
+    pub(crate) async fn restore_codex_model_routing_config_inner(
+        &self,
+        config: &crate::proxy::codex_model_routing::CodexModelRoutingConfig,
+    ) -> Result<(), String> {
+        let providers = self
+            .db
+            .get_all_providers("codex")
+            .map_err(|e| e.to_string())?;
+        let takeover = self
+            .db
+            .get_proxy_config_for_app("codex")
+            .await
+            .map_err(|e| e.to_string())?
+            .enabled;
+        if config.enabled && takeover {
+            self.project_codex_model_routing(config, &providers).await?;
+        }
+        self.db
+            .save_codex_model_routing(config)
+            .map_err(|e| e.to_string())
     }
 
     pub async fn hot_switch_provider(
@@ -3265,6 +3384,69 @@ impl ProxyService {
     #[cfg(test)]
     async fn lock_switch_for_test(&self, app_type: &str) -> tokio::sync::OwnedMutexGuard<()> {
         self.switch_locks.lock_for_app(app_type).await
+    }
+
+    /// Preserve Codex desktop preferences that are owned by Codex itself rather
+    /// than by a provider. Provider templates do not carry these keys, so a
+    /// provider/live rewrite must merge them from the current config instead of
+    /// silently resetting the desktop model picker.
+    fn preserve_codex_desktop_preferences_from_existing_config(
+        target_settings: &mut Value,
+        existing_settings: &Value,
+    ) -> Result<(), String> {
+        const DESKTOP_KEYS: [&str; 2] = ["followUpQueueMode", "enabled-reasoning-efforts"];
+
+        let existing_config = existing_settings
+            .get("config")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if existing_config.trim().is_empty() {
+            return Ok(());
+        }
+        let existing_doc = existing_config
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|e| format!("解析现有 Codex config.toml 失败: {e}"))?;
+        let values: Vec<(&str, toml_edit::Item)> = existing_doc
+            .get("desktop")
+            .and_then(|item| item.as_table_like())
+            .map(|desktop| {
+                DESKTOP_KEYS
+                    .iter()
+                    .filter_map(|key| desktop.get(key).cloned().map(|item| (*key, item)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if values.is_empty() {
+            return Ok(());
+        }
+
+        let target_obj = target_settings
+            .as_object_mut()
+            .ok_or_else(|| "Codex 供应商配置必须是 JSON 对象".to_string())?;
+        let target_config = target_obj
+            .get("config")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let mut target_doc = if target_config.trim().is_empty() {
+            toml_edit::DocumentMut::new()
+        } else {
+            target_config
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|e| format!("解析目标 Codex config.toml 失败: {e}"))?
+        };
+
+        if target_doc.get("desktop").is_none() {
+            target_doc["desktop"] = toml_edit::table();
+        }
+        let desktop = target_doc
+            .get_mut("desktop")
+            .and_then(|item| item.as_table_like_mut())
+            .ok_or_else(|| "Codex config.toml 的 desktop 必须是表".to_string())?;
+        for (key, value) in values {
+            desktop.insert(key, value);
+        }
+        target_obj.insert("config".to_string(), json!(target_doc.to_string()));
+        Ok(())
     }
 
     fn preserve_toml_mcp_servers_from_existing_config(
@@ -3827,7 +4009,7 @@ impl ProxyService {
         config: &Value,
         expected_auth: Option<&CodexAuthFileSnapshot>,
     ) -> Result<(), String> {
-        use crate::codex_config::{get_codex_auth_path, get_codex_config_path};
+        use crate::codex_config::get_codex_auth_path;
 
         let auth = config.get("auth");
         let config_str = config.get("config").and_then(|v| v.as_str());
@@ -3906,7 +4088,7 @@ impl ProxyService {
                 }
 
                 let config_result = prepared_cfg.as_deref().map_or(Ok(()), |cfg| {
-                    crate::config::write_text_file(&get_codex_config_path(), cfg)
+                    crate::codex_config::write_codex_live_config_atomic(Some(cfg))
                         .map_err(|error| format!("写入 Codex config 失败: {error}"))
                 });
                 match config_result {
@@ -3926,7 +4108,7 @@ impl ProxyService {
                         // Unguarded provider writes preserve an existing login;
                         // only restore transactions interpret empty auth as an
                         // exact-generation deletion.
-                        crate::config::write_text_file(&get_codex_config_path(), cfg)
+                        crate::codex_config::write_codex_live_config_atomic(Some(cfg))
                             .map_err(|e| format!("写入 Codex config 失败: {e}"))
                     } else {
                         crate::codex_config::write_codex_live_atomic(auth, Some(cfg))
@@ -3941,7 +4123,7 @@ impl ProxyService {
                             .map_err(|e| format!("写入 Codex auth 失败: {e}"))
                     }
                 }
-                (None, Some(cfg)) => crate::config::write_text_file(&get_codex_config_path(), cfg)
+                (None, Some(cfg)) => crate::codex_config::write_codex_live_config_atomic(Some(cfg))
                     .map_err(|e| format!("写入 Codex config 失败: {e}")),
                 (None, None) => Ok(()),
             }
@@ -4240,6 +4422,230 @@ mod tests {
             let actual = db.get_proxy_config_for_app(app).await.unwrap();
             assert_eq!(serde_json::to_value(actual).unwrap(), *expected, "{app}");
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn codex_shared_provider_id_survives_router_toggle_and_restore() {
+        use crate::proxy::codex_model_routing::{CodexModelRoutingConfig, ModelSelection};
+        let _home = TempHome::new();
+        crate::settings::reload_settings().unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+        use_ephemeral_proxy_port(&db).await;
+        let config = "model = \"x\"\nmodel_provider = \"custom\"\n[model_providers.custom]\nname = \"Station\"\nbase_url = \"https://example.test/v1\"\nwire_api = \"responses\"\n";
+        let provider = Provider::with_id(
+            "shared-station".into(),
+            "Station".into(),
+            json!({
+                "auth": {"OPENAI_API_KEY": "fixture-key"}, "config": config,
+                "modelCatalog": {"models": [{"model": "x"}]}
+            }),
+            None,
+        );
+        db.save_provider("codex", &provider).unwrap();
+        db.set_current_provider("codex", &provider.id).unwrap();
+        crate::settings::set_current_provider(&AppType::Codex, Some(&provider.id)).unwrap();
+        crate::codex_config::write_codex_live_atomic(
+            &json!({"OPENAI_API_KEY": "fixture-key"}),
+            Some(config),
+        )
+        .unwrap();
+        let service = ProxyService::new(db);
+        service.start().await.unwrap();
+        service
+            .save_codex_model_routing_config(CodexModelRoutingConfig {
+                models: vec![ModelSelection {
+                    provider_id: provider.id.clone(),
+                    model: "x".into(),
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        for enabled in [true, false, true, false] {
+            service
+                .set_codex_model_routing_enabled(enabled)
+                .await
+                .unwrap();
+            let live = crate::codex_config::read_codex_config_text().unwrap();
+            assert_eq!(
+                crate::codex_session_visibility::target_provider(&live).unwrap(),
+                "custom"
+            );
+        }
+        service.stop_with_restore().await.unwrap();
+        let live = crate::codex_config::read_codex_config_text().unwrap();
+        assert_eq!(
+            crate::codex_session_visibility::target_provider(&live).unwrap(),
+            "custom"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn routing_toggle_repairs_partial_desktop_and_keeps_explicit_efforts() {
+        use crate::proxy::codex_model_routing::{CodexModelRoutingConfig, ModelSelection};
+        let _home = TempHome::new();
+        crate::settings::reload_settings().unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+        use_ephemeral_proxy_port(&db).await;
+        let provider = Provider::with_id(
+            "station".into(),
+            "Station".into(),
+            json!({
+                "auth": {"OPENAI_API_KEY": "test-key"},
+                "config": "model = \"x\"\nmodel_provider = \"station\"\n[model_providers.station]\nbase_url = \"https://example.test/v1\"\nwire_api = \"responses\"\n",
+                "modelCatalog": {"models": [{"model": "x", "reasoningLevels": ["low", "high", "max"], "defaultReasoningLevel": "high"}]}
+            }),
+            None,
+        );
+        db.save_provider("codex", &provider).unwrap();
+        db.set_current_provider("codex", "station").unwrap();
+        crate::settings::set_current_provider(&AppType::Codex, Some("station")).unwrap();
+        db.save_codex_model_routing(&CodexModelRoutingConfig {
+            models: vec![ModelSelection {
+                provider_id: "station".into(),
+                model: "x".into(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        let path = crate::codex_config::get_codex_config_path();
+        let partial = "model = \"x\"\n[desktop]\nfollowUpQueueMode = \"queue\"\n";
+        crate::codex_config::write_codex_live_atomic(
+            &json!({"OPENAI_API_KEY": "test-key"}),
+            Some(partial),
+        )
+        .unwrap();
+        let service = ProxyService::new(db);
+        // Resolve the ephemeral listener before routing's preflight URL check.
+        service.start().await.unwrap();
+        let expected = json!([
+            "persistent",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+        ]);
+        // Exercise the real enable/disable API, including startup, backup,
+        // projection, low-level write, and restoration of the partial backup.
+        for enabled in [true, false, true, false] {
+            service
+                .set_codex_model_routing_enabled(enabled)
+                .await
+                .unwrap();
+            let live: toml::Value =
+                toml::from_str(&crate::codex_config::read_codex_config_text().unwrap()).unwrap();
+            assert_eq!(
+                serde_json::to_value(&live["desktop"]["enabled-reasoning-efforts"]).unwrap(),
+                expected
+            );
+            assert_eq!(live["desktop"]["followUpQueueMode"].as_str(), Some("queue"));
+        }
+        // Simulate explicit edits by Codex itself, bypassing provider writers.
+        for efforts in ["[]", "[\"low\", \"max\"]"] {
+            crate::config::write_text_file(
+                &path,
+                &format!("{partial}enabled-reasoning-efforts = {efforts}\n"),
+            )
+            .unwrap();
+            for enabled in [true, false] {
+                service
+                    .set_codex_model_routing_enabled(enabled)
+                    .await
+                    .unwrap();
+                let live: toml::Value =
+                    toml::from_str(&crate::codex_config::read_codex_config_text().unwrap())
+                        .unwrap();
+                assert_eq!(
+                    serde_json::to_value(&live["desktop"]["enabled-reasoning-efforts"]).unwrap(),
+                    serde_json::from_str::<Value>(efforts).unwrap()
+                );
+            }
+        }
+        service.stop_with_restore().await.unwrap();
+    }
+
+    #[test]
+    #[serial]
+    fn desktop_preferences_survive_mode_switch_and_stale_backup_restore() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().unwrap();
+        let service = ProxyService::new(Arc::new(Database::memory().unwrap()));
+        let initial = r#"model = "original"
+[desktop]
+followUpQueueMode = "queue"
+enabled-reasoning-efforts = ["persistent", "low", "medium", "high", "xhigh", "max", "ultra"]
+futurePreference = true
+"#;
+        crate::codex_config::write_codex_live_atomic(&json!({}), Some(initial)).unwrap();
+        let expected: toml::Value = toml::from_str(initial).unwrap();
+        // Provider switching: both auth-writing and config-only paths.
+        crate::codex_config::write_codex_live_atomic(
+            &json!({"OPENAI_API_KEY": "test"}),
+            Some("model = \"other\"\n"),
+        )
+        .unwrap();
+        crate::codex_config::write_codex_live_config_atomic(Some("model = \"routed\"\n")).unwrap();
+        // All restore auth shapes must preserve live UI preferences, not the
+        // stale desktop options captured before MAX was enabled in Codex.
+        for auth in [
+            None,
+            Some(json!({})),
+            Some(json!({"OPENAI_API_KEY": "test"})),
+        ] {
+            let mut backup = json!({"config": "model = \"restored\"\n[desktop]\nenabled-reasoning-efforts = [\"low\"]\n"});
+            if let Some(auth) = auth {
+                backup["auth"] = auth;
+            }
+            service.write_codex_live_verbatim(&backup).unwrap();
+            service.write_codex_restore_backup(&backup).unwrap();
+            let actual: toml::Value =
+                toml::from_str(&crate::codex_config::read_codex_config_text().unwrap()).unwrap();
+            assert_eq!(actual["desktop"], expected["desktop"]);
+            assert_eq!(actual["model"].as_str(), Some("restored"));
+        }
+    }
+
+    #[test]
+    fn preserve_codex_desktop_preferences_keeps_max_effort_options() {
+        let mut target = serde_json::json!({
+            "config": "model = \"gpt-5-codex\"\n"
+        });
+        let existing = serde_json::json!({
+            "config": r#"[desktop]
+followUpQueueMode = "queue"
+enabled-reasoning-efforts = ["persistent", "low", "medium", "high", "xhigh", "max", "ultra"]
+"#
+        });
+
+        ProxyService::preserve_codex_desktop_preferences_from_existing_config(
+            &mut target,
+            &existing,
+        )
+        .expect("desktop preferences should merge into provider config");
+
+        let config = target["config"].as_str().expect("config text");
+        let document = config
+            .parse::<toml_edit::DocumentMut>()
+            .expect("merged config is valid TOML");
+        let desktop = document["desktop"].as_table_like().expect("desktop table");
+        assert_eq!(
+            desktop
+                .get("followUpQueueMode")
+                .and_then(|value| value.as_str()),
+            Some("queue")
+        );
+        assert_eq!(
+            desktop
+                .get("enabled-reasoning-efforts")
+                .and_then(|value| value.as_array())
+                .and_then(|values| values.get(5))
+                .and_then(|value| value.as_str()),
+            Some("max")
+        );
     }
 
     #[tokio::test]

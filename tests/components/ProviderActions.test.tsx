@@ -148,3 +148,28 @@ describe("ProviderActions Pi provider switching", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("Codex routing action labels", () => {
+  it.each([false, true])(
+    "sizes long labels to content (current=%s)",
+    (isCurrent) => {
+      render(
+        <ProviderActions
+          appId="codex"
+          isCurrent={isCurrent}
+          isCodexModelRoutingActive
+          onSwitch={vi.fn()}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+      const button = screen.getByRole("button", {
+        name: isCurrent ? "路由关闭后默认" : "设为关闭后默认",
+      });
+      expect(button).toHaveClass("w-auto", "shrink-0");
+      expect(button).not.toHaveClass("w-[4.5rem]");
+      if (isCurrent) expect(button).toBeDisabled();
+      else expect(button).toBeEnabled();
+    },
+  );
+});

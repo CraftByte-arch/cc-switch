@@ -69,6 +69,8 @@ interface ProviderCardProps {
   isTesting?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管，切换为热切换）
+  isCodexModelRoutingActive?: boolean;
+  codexRoutingModelCount?: number;
   dragHandleProps?: DragHandleProps;
   isAutoFailoverEnabled?: boolean; // 是否开启自动故障转移
   failoverPriority?: number; // 故障转移优先级（1 = P1, 2 = P2, ...）
@@ -186,6 +188,8 @@ export function ProviderCard({
   isTesting,
   isProxyRunning,
   isProxyTakeover = false,
+  isCodexModelRoutingActive = false,
+  codexRoutingModelCount = 0,
   dragHandleProps,
   isAutoFailoverEnabled = false,
   failoverPriority,
@@ -291,6 +295,7 @@ export function ProviderCard({
   );
   const isOfficialBlockedByProxy =
     isProxyTakeover &&
+    !isCodexModelRoutingActive &&
     provider.category === "official" &&
     !supportsOfficialRouting;
   const isCopilot =
@@ -471,6 +476,25 @@ export function ProviderCard({
                   tone="info"
                   label={t("provider.needsRouting", {
                     defaultValue: "需要路由",
+                  })}
+                />
+              )}
+
+              {isCodexModelRoutingActive && codexRoutingModelCount > 0 && (
+                <ProviderStatusBadge
+                  tone="info"
+                  label={t("provider.routingUsage", {
+                    count: codexRoutingModelCount,
+                    defaultValue: "路由中使用 {{count}} 个模型",
+                  })}
+                />
+              )}
+
+              {isCodexModelRoutingActive && isCurrent && (
+                <ProviderStatusBadge
+                  tone="success"
+                  label={t("provider.routingDefaultBadge", {
+                    defaultValue: "路由关闭后默认",
                   })}
                 />
               )}
@@ -688,6 +712,7 @@ export function ProviderCard({
               isInConfig={isInConfig}
               isTesting={isTesting}
               isProxyTakeover={isProxyTakeover}
+              isCodexModelRoutingActive={isCodexModelRoutingActive}
               isOfficialBlockedByProxy={isOfficialBlockedByProxy}
               isReadOnly={isHermesReadOnly}
               isOmo={isAnyOmo}

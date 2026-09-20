@@ -31,7 +31,12 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
 import type { EnvConflict } from "@/types/env";
-import { proxyKeys, useProvidersQuery, useSettingsQuery } from "@/lib/query";
+import {
+  proxyKeys,
+  useProvidersQuery,
+  useSettingsQuery,
+  useCodexModelRouting,
+} from "@/lib/query";
 import {
   piApi,
   providersApi,
@@ -75,6 +80,10 @@ import { ProxyToggle } from "@/components/proxy/ProxyToggle";
 import { ClaudeDesktopRouteToggle } from "@/components/proxy/ClaudeDesktopRouteToggle";
 import { FailoverToggle } from "@/components/proxy/FailoverToggle";
 import { RoutingActivationBrand } from "@/components/proxy/RoutingActivationBrand";
+import {
+  CodexMaintenanceActions,
+  CodexMaintenanceDialog,
+} from "@/components/proxy/CodexMaintenance";
 import { CodexModelRoutingCard } from "@/components/proxy/CodexModelRoutingCard";
 import UsageScriptModal from "@/components/UsageScriptModal";
 import UnifiedMcpPanel from "@/components/mcp/UnifiedMcpPanel";
@@ -297,8 +306,19 @@ function App() {
     isProxyRunning: currentAppUsesProxy && isProxyRunning,
   });
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
+  const { data: codexRouting } = useCodexModelRouting(activeApp === "codex");
   const providers = useMemo(() => data?.providers ?? {}, [data]);
   const currentProviderId = data?.currentProviderId ?? "";
+  const isCodexModelRoutingActive =
+    activeApp === "codex" &&
+    Boolean(codexRouting?.enabled && isCurrentAppTakeoverActive);
+  const codexRoutingUsageByProvider = useMemo(() => {
+    const usage: Record<string, number> = {};
+    for (const entry of codexRouting?.models ?? []) {
+      usage[entry.providerId] = (usage[entry.providerId] ?? 0) + 1;
+    }
+    return usage;
+  }, [codexRouting?.models]);
   const isOpenClawView =
     activeApp === "openclaw" &&
     (currentView === "providers" ||
@@ -333,6 +353,7 @@ function App() {
     activeApp,
     currentAppUsesProxy && isProxyRunning,
     isProxyRunning && isCurrentAppTakeoverActive,
+    isCodexModelRoutingActive,
   );
   const handleEnablePiProvider = async (provider: Provider) => {
     try {
@@ -913,10 +934,41 @@ function App() {
       activeApp === "pi" &&
       piCurrentState?.defaultProviderId === confirmAction.provider.id;
 
+    let detail = message;
+    if (
+      activeApp === "codex" &&
+      isCodexModelRoutingActive &&
+      confirmAction.action === "delete"
+    ) {
+      const routedCount =
+        codexRoutingUsageByProvider[confirmAction.provider.id] ?? 0;
+      if (routedCount > 0) {
+        detail += `\n\n${t("confirm.codexRoutingDeleteImpact", {
+          count: routedCount,
+          defaultValue:
+            "该供应商正在 Codex 模型路由中使用 {{count}} 个模型，删除后这些路由也会一并移除。",
+        })}`;
+      }
+      if (confirmAction.provider.id === currentProviderId) {
+        detail += `\n\n${t("confirm.codexRoutingDefaultFallback", {
+          defaultValue:
+            "它是关闭模型路由后的默认供应商，删除后会自动选择其他供应商作为默认项。",
+        })}`;
+      }
+    }
+
     return isPiGlobalDefault
-      ? `${message}\n\n${t("confirm.piDefaultProviderWarning")}`
-      : message;
-  }, [activeApp, confirmAction, piCurrentState?.defaultProviderId, t]);
+      ? `${detail}\n\n${t("confirm.piDefaultProviderWarning")}`
+      : detail;
+  }, [
+    activeApp,
+    confirmAction,
+    codexRoutingUsageByProvider,
+    currentProviderId,
+    isCodexModelRoutingActive,
+    piCurrentState?.defaultProviderId,
+    t,
+  ]);
 
   const handleOpenTerminal = async (provider: Provider) => {
     try {
@@ -1104,6 +1156,7 @@ function App() {
                     transition={{ duration: 0.15 }}
                     className="space-y-4"
                   >
+                    {activeApp === "codex" && <CodexMaintenanceActions />}
                     {activeApp === "codex" && (
                       <CodexModelRoutingCard
                         providers={providers}
@@ -1119,6 +1172,8 @@ function App() {
                       isProxyTakeover={
                         isProxyRunning && isCurrentAppTakeoverActive
                       }
+                      isCodexModelRoutingActive={isCodexModelRoutingActive}
+                      codexRoutingUsageByProvider={codexRoutingUsageByProvider}
                       activeProviderId={activeProviderId}
                       onSwitch={
                         activeApp === "pi"
@@ -1833,6 +1888,7 @@ function App() {
         onCancel={() => setLaunchDashboardOpen(false)}
       />
 
+      <CodexMaintenanceDialog />
       <DeepLinkImportDialog />
       <FirstRunNoticeDialog />
     </div>

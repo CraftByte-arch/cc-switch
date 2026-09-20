@@ -11,10 +11,10 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 /// Only the two files owned by this feature. Never snapshot/restore auth.json.
-struct RouterFiles(Vec<(PathBuf, Option<String>)>);
+pub(crate) struct RouterFiles(Vec<(PathBuf, Option<String>)>);
 
 impl RouterFiles {
-    fn capture() -> Result<Self, String> {
+    pub(crate) fn capture() -> Result<Self, String> {
         let paths = [
             crate::codex_config::get_codex_config_path(),
             crate::codex_config::get_codex_config_dir().join(routing::CATALOG_FILENAME),
@@ -37,7 +37,7 @@ impl RouterFiles {
         Ok(Self(files))
     }
 
-    fn restore(&self) -> Result<(), String> {
+    pub(crate) fn restore(&self) -> Result<(), String> {
         for (path, text) in &self.0 {
             if let Some(text) = text {
                 crate::config::write_text_file(path, text).map_err(|e| e.to_string())?;
@@ -108,7 +108,7 @@ impl ProxyService {
     }
 
     /// Caller owns the Codex switch lock. DB is not changed here.
-    async fn project_codex_model_routing(
+    pub(crate) async fn project_codex_model_routing(
         &self,
         config: &CodexModelRoutingConfig,
         providers: &IndexMap<String, Provider>,
@@ -273,21 +273,41 @@ impl ProxyService {
         &self,
         provider: &Provider,
     ) -> Result<(), AppError> {
-        let config = self.db.get_codex_model_routing()?;
+        let old_config = self.db.get_codex_model_routing()?;
         let mut providers = self.db.get_all_providers("codex")?;
-        let old = providers.insert(provider.id.clone(), provider.clone());
-        config.validate(&providers, true)?;
+        let old_provider = providers.insert(provider.id.clone(), provider.clone());
+        let mut next_config = old_config.clone();
+
+        // Editing a provider's model catalog is allowed while routing is live.
+        // Any selected route that no longer exists is removed atomically with
+        // the provider edit instead of making the whole form impossible to save.
+        next_config.models.retain(|entry| {
+            entry.provider_id != provider.id || routing::has_model(provider, &entry.model)
+        });
+        if next_config.models.is_empty() {
+            return Err(AppError::InvalidInput(
+                "该供应商删除了模型路由中唯一启用的模型，请先在「管理模型」中选择其他模型后再保存"
+                    .into(),
+            ));
+        }
+        next_config.validate(&providers, true)?;
+        next_config.validate_visible_combinations(&providers)?;
+
         let files = RouterFiles::capture().map_err(AppError::Message)?;
-        self.project_codex_model_routing(&config, &providers)
+        self.project_codex_model_routing(&next_config, &providers)
             .await
             .map_err(AppError::Message)?;
         if let Err(error) = self.db.save_provider("codex", provider) {
             files.restore().map_err(AppError::Message)?;
             return Err(error);
         }
-        // `old` documents that this operation only replaces an existing row;
-        // callers perform their standard provider existence validation.
-        debug_assert!(old.is_some());
+        if let Err(error) = self.db.save_codex_model_routing(&next_config) {
+            if let Some(old_provider) = old_provider.as_ref() {
+                let _ = self.db.save_provider("codex", old_provider);
+            }
+            files.restore().map_err(AppError::Message)?;
+            return Err(error);
+        }
         Ok(())
     }
 }

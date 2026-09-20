@@ -6,6 +6,8 @@ mod claude_mcp;
 mod claude_plugin;
 mod codex_config;
 mod codex_history_migration;
+mod codex_session_visibility;
+mod codex_visibility_backups;
 mod codex_state_db;
 mod commands;
 mod config;
@@ -1569,6 +1571,11 @@ pub fn run() {
             commands::get_global_proxy_config,
             commands::update_global_proxy_config,
             commands::get_proxy_config_for_app,
+            commands::get_codex_maintenance_status,
+            commands::get_codex_repair_backups,
+            commands::cleanup_codex_repair_backups,
+            commands::run_codex_maintenance,
+            commands::preview_codex_repair,
             commands::get_codex_model_routing,
             commands::get_codex_model_routing_capabilities,
             commands::save_codex_model_routing,

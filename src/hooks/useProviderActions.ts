@@ -45,6 +45,7 @@ export function useProviderActions(
   activeApp: AppId,
   isProxyRunning?: boolean,
   isProxyTakeover?: boolean,
+  isCodexModelRoutingActive?: boolean,
 ) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -168,6 +169,21 @@ export function useProviderActions(
   // 切换供应商
   const switchProvider = useCallback(
     async (provider: Provider) => {
+      if (activeApp === "codex" && isCodexModelRoutingActive) {
+        try {
+          await switchProviderMutation.mutateAsync(provider.id);
+          toast.success(
+            t("notifications.codexRoutingDefaultChanged", {
+              defaultValue: "已设置为关闭模型路由后的默认供应商",
+            }),
+            { closeButton: true },
+          );
+        } catch {
+          // 错误提示由 mutation 处理。
+        }
+        return;
+      }
+
       const isCopilotProvider =
         activeApp === "claude" &&
         provider.meta?.providerType === "github_copilot";
@@ -369,6 +385,7 @@ export function useProviderActions(
       activeApp,
       isProxyRunning,
       isProxyTakeover,
+      isCodexModelRoutingActive,
       t,
     ],
   );

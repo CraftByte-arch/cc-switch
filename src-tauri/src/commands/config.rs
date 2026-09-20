@@ -336,7 +336,12 @@ pub async fn set_common_config_snippet(
     app_type: String,
     snippet: String,
     state: tauri::State<'_, crate::store::AppState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    // Return whether this save actually changed Codex's live TOML. The snippet
+    // editor can be opened from an inactive provider, so UI cache alone cannot
+    // tell whether a restart prompt is appropriate.
+    let codex_path = crate::codex_config::get_codex_config_path();
+    let before = (app_type == "codex").then(|| std::fs::read(&codex_path).ok());
     let is_cleared = snippet.trim().is_empty();
     let old_snippet = state
         .db
@@ -406,7 +411,7 @@ pub async fn set_common_config_snippet(
         )
         .map_err(|e| e.to_string())?;
     }
-    Ok(())
+    Ok(before.is_some_and(|previous| previous != std::fs::read(codex_path).ok()))
 }
 
 #[cfg(test)]

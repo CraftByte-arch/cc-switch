@@ -2044,6 +2044,12 @@ requires_openai_auth = true
 
         // Claude Desktop keeps backup state from takeover startup; this sentinel only
         // marks takeover as active so provider updates rewrite the 3P profile.
+        // Do not contend with a running desktop app's default proxy port.
+        let mut proxy_config = db.get_proxy_config().await.expect("get proxy config");
+        proxy_config.listen_port = 0;
+        db.update_proxy_config(proxy_config)
+            .await
+            .expect("use an ephemeral proxy port");
         db.save_live_backup("claude-desktop", "{}")
             .await
             .expect("seed live backup");
@@ -2058,7 +2064,7 @@ requires_openai_auth = true
                 .expect("update app proxy config");
         }
 
-        state
+        let proxy_info = state
             .proxy_service
             .start()
             .await
@@ -2106,7 +2112,7 @@ requires_openai_auth = true
         let profile: Value = read_json_file(&profile_path).expect("read desktop profile");
         assert_eq!(
             profile["inferenceGatewayBaseUrl"],
-            json!("http://127.0.0.1:15721/claude-desktop"),
+            json!(format!("http://127.0.0.1:{}/claude-desktop", proxy_info.port)),
             "desktop profile should stay pointed at the local gateway during takeover"
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
@@ -2115,6 +2121,12 @@ requires_openai_auth = true
             json!([{ "name": "claude-sonnet-4-6", "labelOverride": "DeepSeek V4 Flash Updated", "supports1m": true }]),
             "provider edits should propagate into the Claude Desktop 3P profile during takeover"
         );
+
+        state
+            .proxy_service
+            .stop()
+            .await
+            .expect("stop test proxy service");
     }
 
     #[test]
@@ -5564,7 +5576,97 @@ impl ProviderService {
         let _routing_guard = if matches!(app_type, AppType::Codex) {
             let guard =
                 futures::executor::block_on(state.proxy_service.lock_switch_for_app("codex"));
-            if state.db.get_codex_model_routing()?.references_provider(id) {
+            let routing = state.db.get_codex_model_routing()?;
+            let routing_active = routing.enabled
+                && futures::executor::block_on(state.db.get_proxy_config_for_app("codex"))?.enabled;
+
+            if routing_active {
+                let existing = state
+                    .db
+                    .get_provider_by_id(id, "codex")?
+                    .ok_or_else(|| AppError::Message(format!("供应商 {id} 不存在")))?;
+                let providers = state.db.get_all_providers("codex")?;
+                let previous_local = crate::settings::get_current_provider(&app_type);
+                let previous_db = state.db.get_current_provider("codex")?;
+                let is_default =
+                    previous_local.as_deref() == Some(id) || previous_db.as_deref() == Some(id);
+                let fallback = providers.values().find(|provider| provider.id != id);
+
+                if is_default && fallback.is_none() {
+                    return Err(AppError::InvalidInput(
+                        "无法删除唯一的 Codex 供应商，请先添加其他供应商作为关闭路由后的默认供应商"
+                            .into(),
+                    ));
+                }
+
+                let old_routing = futures::executor::block_on(
+                    state
+                        .proxy_service
+                        .remove_codex_provider_references_inner(id),
+                )
+                .map_err(AppError::Message)?;
+
+                let fallback_id = fallback.map(|provider| provider.id.clone());
+                if let Some(fallback_id) = fallback_id.as_deref().filter(|_| is_default) {
+                    if let Err(error) =
+                        crate::settings::set_current_provider(&app_type, Some(fallback_id))
+                    {
+                        if let Some(old_routing) = old_routing.as_ref() {
+                            let _ = futures::executor::block_on(
+                                state
+                                    .proxy_service
+                                    .restore_codex_model_routing_config_inner(old_routing),
+                            );
+                        }
+                        return Err(error);
+                    }
+                    if let Err(error) = state.db.set_current_provider("codex", fallback_id) {
+                        let _ = crate::settings::set_current_provider(
+                            &app_type,
+                            previous_local.as_deref(),
+                        );
+                        if let Some(old_routing) = old_routing.as_ref() {
+                            let _ = futures::executor::block_on(
+                                state
+                                    .proxy_service
+                                    .restore_codex_model_routing_config_inner(old_routing),
+                            );
+                        }
+                        return Err(error);
+                    }
+                }
+
+                if let Err(error) = state.db.delete_provider("codex", id) {
+                    if is_default {
+                        let _ = crate::settings::set_current_provider(
+                            &app_type,
+                            previous_local.as_deref(),
+                        );
+                        if let Some(previous_db) = previous_db.as_deref() {
+                            let _ = state.db.set_current_provider("codex", previous_db);
+                        }
+                    }
+                    if let Some(old_routing) = old_routing.as_ref() {
+                        if let Err(rollback_error) = futures::executor::block_on(
+                            state
+                                .proxy_service
+                                .restore_codex_model_routing_config_inner(old_routing),
+                        ) {
+                            log::error!(
+                                "删除 Codex 供应商失败后回滚模型路由失败: {rollback_error}"
+                            );
+                        }
+                    }
+                    return Err(error);
+                }
+                log::info!(
+                    "Codex 模型路由开启：已删除供应商 {}，并清理其路由引用",
+                    existing.name
+                );
+                return Ok(());
+            }
+
+            if routing.references_provider(id) {
                 return Err(AppError::InvalidInput(
                     "该供应商被 Codex 模型路由引用，请先在「管理模型」中取消选择".into(),
                 ));
@@ -5769,6 +5871,26 @@ impl ProviderService {
             .detect_takeover_in_live_config_for_app(&app_type);
 
         let should_hot_switch = is_app_taken_over || live_taken_over;
+        let codex_model_routing_active = if matches!(app_type, AppType::Codex) {
+            state.db.get_codex_model_routing()?.enabled
+                && futures::executor::block_on(state.db.get_proxy_config_for_app("codex"))?.enabled
+                && should_hot_switch
+        } else {
+            false
+        };
+
+        if codex_model_routing_active {
+            // Model routing owns the Live config. Switching here only changes
+            // the provider used after routing is disabled; it must not rewrite
+            // the routed config.toml or alter the selected model routes.
+            futures::executor::block_on(
+                state
+                    .proxy_service
+                    .set_codex_default_provider_while_routing_inner(id),
+            )
+            .map_err(AppError::Message)?;
+            return Ok(SwitchResult::default());
+        }
 
         // Block switching to unsupported official providers when proxy takeover
         // is active. Codex official account cards use native auth passthrough.
