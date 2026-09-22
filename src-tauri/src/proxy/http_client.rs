@@ -214,6 +214,21 @@ pub fn is_proxy_enabled() -> bool {
 
 /// 构建 HTTP 客户端
 fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    configured_client_builder(proxy_url)?
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))
+}
+
+/// Sensitive fixed-origin discovery retains the configured proxy but must not
+/// forward account headers through redirects (including same-origin redirects).
+pub fn get_without_redirects() -> Result<Client, String> {
+    configured_client_builder(get_current_proxy_url().as_deref())?
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "Failed to build fixed-origin HTTP client".into())
+}
+
+fn configured_client_builder(proxy_url: Option<&str>) -> Result<reqwest::ClientBuilder, String> {
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(600))
         .connect_timeout(Duration::from_secs(30))
@@ -258,9 +273,7 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
         }
     }
 
-    builder
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))
+    Ok(builder)
 }
 
 fn system_proxy_points_to_loopback() -> bool {

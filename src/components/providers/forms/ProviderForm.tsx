@@ -1,3 +1,4 @@
+import { normalizeCodexCatalogModelsForSave } from "@/utils/codexCatalog";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -154,57 +155,7 @@ function getPresetProviderType(
     : undefined;
 }
 
-export const normalizeCodexCatalogModelsForSave = (
-  models: CodexCatalogModel[],
-): CodexCatalogModel[] => {
-  const seen = new Set<string>();
-  const normalized: CodexCatalogModel[] = [];
-
-  for (const item of models) {
-    const model = item.model.trim();
-    if (!model || seen.has(model)) continue;
-    seen.add(model);
-
-    const displayName = item.displayName?.trim();
-    const rawContextWindow = String(item.contextWindow ?? "").replace(
-      /[^\d]/g,
-      "",
-    );
-    const contextWindow = rawContextWindow
-      ? Number.parseInt(rawContextWindow, 10)
-      : undefined;
-
-    const inputModalities = item.inputModalities?.filter(
-      (m) => typeof m === "string" && m.trim(),
-    );
-
-    const baseInstructions = item.baseInstructions?.trim();
-    const reasoningLevels = item.reasoningLevels
-      ?.filter((level) => typeof level === "string" && level.trim())
-      .map((level) => level.trim());
-    const defaultReasoningLevel = item.defaultReasoningLevel?.trim();
-
-    normalized.push({
-      model,
-      ...(displayName ? { displayName } : {}),
-      ...(contextWindow && contextWindow > 0 ? { contextWindow } : {}),
-      // Native Responses profile overrides (ignored by the chat/proxy profile).
-      ...(typeof item.supportsParallelToolCalls === "boolean"
-        ? { supportsParallelToolCalls: item.supportsParallelToolCalls }
-        : {}),
-      ...(inputModalities && inputModalities.length > 0
-        ? { inputModalities }
-        : {}),
-      ...(baseInstructions ? { baseInstructions } : {}),
-      ...(reasoningLevels && reasoningLevels.length > 0
-        ? { reasoningLevels }
-        : {}),
-      ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
-    });
-  }
-
-  return normalized;
-};
+export { normalizeCodexCatalogModelsForSave } from "@/utils/codexCatalog";
 
 const normalizeCodexChatReasoningForSave = (
   value?: CodexChatReasoning,

@@ -1,0 +1,832 @@
+/* Scoped, content-width responsive workspace. No global theme or scroll changes. */
+.codex-routing-layout {
+  container: codex-routing / inline-size;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+}
+
+.codex-routing-layout .routing-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px 8px;
+  flex-shrink: 0;
+  min-height: 36px;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-toolbar-main {
+  display: flex;
+  justify-content: flex-end;
+  flex: 1 1 12rem;
+  margin-left: auto;
+  min-width: 8rem;
+  max-width: 20rem;
+}
+
+.codex-routing-layout .routing-toolbar-main > [hidden] {
+  display: none !important;
+}
+
+.codex-routing-layout .routing-toolbar-search {
+  position: relative;
+  width: 100%;
+  max-width: 18rem;
+  margin-left: auto;
+}
+
+.codex-routing-layout .routing-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.codex-routing-layout .routing-toolbar-sort {
+  width: 100%;
+}
+
+.codex-routing-layout .routing-toolbar-secondary {
+  display: flex;
+  align-items: center;
+  gap: 6px 10px;
+  flex-shrink: 0;
+  min-height: 28px;
+}
+
+.codex-routing-layout .routing-settings {
+  display: contents;
+}
+
+.codex-routing-layout .routing-setting-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-setting-name input {
+  width: 10rem;
+  height: 1.75rem;
+  min-width: 6rem;
+  max-width: 100%;
+}
+
+.codex-routing-layout .routing-setting-name label,
+.codex-routing-layout .routing-setting-switch label {
+  white-space: nowrap;
+}
+
+.codex-routing-layout .routing-setting-switch,
+.codex-routing-layout .routing-setting-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.codex-routing-layout .routing-tabs {
+  position: relative;
+  display: inline-grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 8px;
+  background: hsl(var(--muted) / 0.5);
+}
+
+.codex-routing-layout .routing-tabs-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 2);
+  border-radius: 6px;
+  background: hsl(var(--background));
+  box-shadow: 0 1px 3px hsl(var(--foreground) / 0.08);
+  transition: transform 220ms ease;
+}
+
+.codex-routing-layout
+  .routing-tabs[data-pane="selected"]
+  .routing-tabs-indicator {
+  transform: translateX(100%);
+}
+
+.codex-routing-layout .routing-tabs button {
+  position: relative;
+  z-index: 1;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.codex-routing-layout .routing-tabs button[aria-selected="true"] {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.codex-routing-layout .routing-tabs button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.codex-routing-layout .routing-workspace {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.codex-routing-layout .routing-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transform: translateX(18px);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease,
+    visibility 0s linear 0.22s;
+}
+
+.codex-routing-layout .routing-pane[data-pane="available"] {
+  transform: translateX(-18px);
+}
+
+.codex-routing-layout .routing-pane[data-active="true"] {
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease,
+    visibility 0s linear 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codex-routing-layout .routing-pane,
+  .codex-routing-layout .routing-pane[data-active="true"] {
+    transition: none;
+    transform: none;
+  }
+}
+
+.codex-routing-layout .routing-selected-canvas {
+  display: flex;
+  width: min(100%, 52rem);
+  margin-inline: auto;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.codex-routing-layout .routing-pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 12px 4px 16px 2px;
+  scrollbar-gutter: stable;
+}
+
+/* LEFT PANE: supplier stays left; model cards stay short and wrap. */
+.codex-routing-layout .routing-candidates-scroll {
+  container: routing-candidates / inline-size;
+  overflow-anchor: none;
+}
+
+.codex-routing-layout .routing-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.codex-routing-layout .routing-provider {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.codex-routing-layout .routing-provider:not(.routing-provider-native) {
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border: 1px solid color-mix(in srgb, hsl(var(--foreground)) 14%, transparent);
+  border-radius: 14px;
+  background: hsl(var(--muted));
+}
+
+.codex-routing-layout .routing-provider-header {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  align-self: stretch;
+  max-width: 100%;
+  min-height: 28px;
+  padding-top: 0;
+}
+
+.codex-routing-layout .routing-provider-header h4 {
+  margin: 0;
+  width: auto;
+  flex: 0 1 auto;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.codex-routing-layout .routing-provider-native {
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border: 1px solid hsl(214 32% 78%);
+  border-radius: 14px;
+  background: hsl(214 42% 96%);
+}
+
+.dark .codex-routing-layout .routing-provider-native {
+  border-color: hsl(214 24% 34%);
+  background: hsl(214 28% 18%);
+}
+
+.codex-routing-layout .routing-native-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px 8px;
+  min-height: 32px;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-native-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.codex-routing-layout .routing-native-main h4 {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.codex-routing-layout .routing-native-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.codex-routing-layout .routing-native-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.codex-routing-layout .routing-native-prefix {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: hsl(var(--muted) / 0.35);
+}
+
+.codex-routing-layout .routing-native-note {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.codex-routing-layout .routing-provider-native .routing-model-options {
+  margin-top: 2px;
+}
+
+.codex-routing-layout .routing-model-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 248px);
+  justify-content: start;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-model-option,
+.codex-routing-layout .routing-add-model {
+  width: 248px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-candidate {
+  display: flex;
+  align-items: flex-start;
+  height: 100%;
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
+  border: 1px solid
+    color-mix(in srgb, hsl(var(--foreground)) 12%, hsl(var(--border)));
+  border-radius: 12px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+  background: hsl(var(--background));
+}
+
+.codex-routing-layout .routing-candidate:hover {
+  border-color: color-mix(
+    in srgb,
+    hsl(var(--foreground)) 24%,
+    hsl(var(--border))
+  );
+  background: hsl(var(--background));
+}
+
+.codex-routing-layout .routing-candidate[data-selected="true"] {
+  border-color: hsl(var(--primary) / 0.6);
+  background: hsl(var(--primary) / 0.06);
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.1);
+}
+
+.codex-routing-layout .routing-no-catalog {
+  padding: 8px 12px;
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.codex-routing-layout .routing-model-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.codex-routing-layout .routing-model-select:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.codex-routing-layout .routing-model-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.codex-routing-layout .routing-model-select > span:last-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-model-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name context"
+    "reasoning reasoning";
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: baseline;
+  flex: 1;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-model-select .routing-model-name {
+  grid-area: name;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: hsl(var(--foreground));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-routing-layout .routing-candidate-capabilities {
+  display: contents;
+}
+
+.codex-routing-layout .routing-model-context {
+  grid-area: context;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.codex-routing-layout .routing-model-reasoning {
+  grid-area: reasoning;
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  font-size: 10.5px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-routing-layout .routing-add-model {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 8px;
+  border: 1px dashed
+    color-mix(in srgb, hsl(var(--foreground)) 18%, hsl(var(--border)));
+  border-radius: 12px;
+  background: hsl(var(--background));
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+
+.codex-routing-layout .routing-add-model:hover:not(:disabled) {
+  border-color: hsl(var(--primary) / 0.45);
+  color: hsl(var(--foreground));
+  background: hsl(var(--primary) / 0.04);
+}
+
+.codex-routing-layout .routing-add-model:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.codex-routing-layout .routing-add-model:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@container routing-candidates (max-width: 259px) {
+  .codex-routing-layout .routing-model-options {
+    grid-template-columns: 1fr;
+  }
+
+  .codex-routing-layout .routing-model-option,
+  .codex-routing-layout .routing-add-model {
+    width: 100%;
+  }
+}
+
+.codex-routing-layout .routing-selected-pane {
+  container: routing-selected / inline-size;
+}
+
+.codex-routing-layout .routing-selected-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-selected-row {
+  display: grid;
+  grid-template-columns: 32px 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--background));
+  transition: all 0.15s ease;
+}
+
+.codex-routing-layout .routing-selected-row:hover {
+  border-color: hsl(var(--primary) / 0.3);
+  background: hsl(var(--muted) / 0.2);
+}
+
+.codex-routing-layout
+  .routing-selected-row[data-default="true"]:not([data-conflict="true"]) {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--primary) / 0.04);
+}
+
+.codex-routing-layout .routing-selected-row[data-conflict="true"] {
+  border-color: hsl(var(--destructive) / 0.5);
+  background: hsl(var(--destructive) / 0.05);
+}
+
+.codex-routing-layout .routing-selected-row:focus-within {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Order number */
+.codex-routing-layout .routing-selected-row > span {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Content area */
+.codex-routing-layout .routing-selected-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-selected-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.codex-routing-layout .routing-selected-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-routing-layout .routing-selected-heading .rounded {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.codex-routing-layout .routing-selected-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Compact model details */
+.routing-model-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.4;
+}
+
+.routing-model-details > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.routing-detail-source,
+.routing-detail-model {
+  flex-shrink: 0;
+}
+
+.routing-capabilities-summary,
+.routing-detail-reasoning {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-icon-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 6px;
+  color: hsl(var(--muted-foreground));
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.routing-icon-button:hover:not(:disabled) {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+.routing-icon-button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.routing-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Notices area */
+.codex-routing-layout .routing-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.codex-routing-layout .routing-provider-actions {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 0 2px;
+}
+
+.codex-routing-layout .routing-sort-hint {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.codex-routing-layout .routing-sort-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  gap: 0;
+  padding: 3px;
+  border-radius: 999px;
+  background: hsl(var(--muted) / 0.7);
+}
+
+.codex-routing-layout .routing-sort-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  transition: transform 220ms ease;
+}
+
+.codex-routing-layout
+  .routing-sort-switch[data-value="model"]
+  .routing-sort-indicator {
+  transform: translateX(100%);
+}
+
+.codex-routing-layout
+  .routing-sort-switch[data-value="manual"]
+  .routing-sort-indicator {
+  transform: translateX(200%);
+}
+
+.codex-routing-layout .routing-sort-switch button {
+  position: relative;
+  z-index: 1;
+  min-height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.codex-routing-layout .routing-sort-switch button[aria-checked="true"] {
+  color: hsl(var(--primary-foreground));
+  font-weight: 600;
+}
+
+.codex-routing-layout .routing-sort-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.codex-routing-layout .routing-sort-switch button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codex-routing-layout .routing-sort-indicator,
+  .codex-routing-layout .routing-tabs-indicator {
+    transition: none;
+  }
+}
+
+.codex-routing-layout .routing-set-default {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 20px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.codex-routing-layout .routing-selected-heading:hover .routing-set-default,
+.codex-routing-layout
+  .routing-selected-heading:focus-within
+  .routing-set-default,
+.codex-routing-layout .routing-selected-row:hover .routing-set-default,
+.codex-routing-layout .routing-selected-row:focus-within .routing-set-default {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.codex-routing-layout .routing-set-default:hover:not(:disabled) {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--primary) / 0.45);
+}
+
+.codex-routing-layout .routing-set-default:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.codex-routing-layout .routing-set-default:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.codex-routing-layout
+  .routing-selected-heading:hover
+  .routing-set-default:disabled,
+.codex-routing-layout
+  .routing-selected-heading:focus-within
+  .routing-set-default:disabled,
+.codex-routing-layout .routing-selected-row:hover .routing-set-default:disabled,
+.codex-routing-layout
+  .routing-selected-row:focus-within
+  .routing-set-default:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Short viewport adjustments */
+@media (max-height: 700px) {
+  .codex-routing-layout {
+    gap: 6px;
+  }
+
+  .codex-routing-layout .routing-settings {
+    gap: 8px;
+  }
+}
+
+@media (pointer: coarse) {
+  .codex-routing-layout .routing-add-model,
+  .codex-routing-layout .routing-set-default {
+    min-height: 44px;
+  }
+
+  .codex-routing-layout .routing-set-default {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .codex-routing-layout .routing-set-default:disabled {
+    pointer-events: none;
+  }
+}

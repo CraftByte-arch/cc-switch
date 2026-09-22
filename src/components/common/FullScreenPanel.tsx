@@ -26,6 +26,8 @@ interface FullScreenPanelProps {
    * 通过 `cn`(twMerge) 合并，传入如 `pt-3` 只覆盖顶部内边距，其余保持默认。
    */
   contentClassName?: string;
+  /** Let a workspace own its pane scrolling without an outer page scrollbar. */
+  scrollMode?: "page" | "contained";
 }
 
 const DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px - match App.tsx
@@ -62,6 +64,7 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
   children,
   footer,
   contentClassName,
+  scrollMode = "page",
   motionPreset = "fade",
 }) => {
   const { t } = useTranslation();
@@ -179,7 +182,14 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto scroll-overlay">
+          <div
+            className={cn(
+              "flex-1 min-h-0",
+              scrollMode === "contained"
+                ? "overflow-hidden"
+                : "overflow-y-auto scroll-overlay",
+            )}
+          >
             <div className={cn("px-6 py-6 space-y-6 w-full", contentClassName)}>
               {children}
             </div>

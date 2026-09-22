@@ -3065,9 +3065,7 @@ impl ProxyService {
         }
         let mut next = old.clone();
         next.models.retain(|entry| entry.provider_id != provider_id);
-        let providers = self
-            .db
-            .get_all_providers("codex")
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, &next)
             .map_err(|e| e.to_string())?;
         let takeover = self
             .db
@@ -3106,9 +3104,7 @@ impl ProxyService {
         &self,
         config: &crate::proxy::codex_model_routing::CodexModelRoutingConfig,
     ) -> Result<(), String> {
-        let providers = self
-            .db
-            .get_all_providers("codex")
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, config)
             .map_err(|e| e.to_string())?;
         let takeover = self
             .db
@@ -4422,6 +4418,102 @@ mod tests {
             let actual = db.get_proxy_config_for_app(app).await.unwrap();
             assert_eq!(serde_json::to_value(actual).unwrap(), *expected, "{app}");
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn native_subscription_routes_preserve_auth_and_survive_router_cache_refresh() {
+        use crate::proxy::{
+            codex_model_routing::{CodexModelRoutingConfig, ModelSelection},
+            codex_native_route,
+        };
+        let _home = TempHome::new();
+        crate::settings::reload_settings().unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+        use_ephemeral_proxy_port(&db).await;
+        let token = crate::proxy::codex_native_auth::test_token("alice", "workspace", i64::MAX);
+        let (_, account_key, _) = crate::proxy::codex_native_auth::token_identity(&token).unwrap();
+        let auth = json!({"tokens":{"access_token":token,"refresh_token":"fixture-refresh","id_token":"fixture-id","account_id":"workspace"}});
+        let native_catalog = codex_native_route::save_test_catalog(
+            &db,
+            account_key,
+            vec![json!({"slug":"gpt-fixture","context_window":222000,"native_tool":"preserve"})],
+        );
+        let original = "model = 'gpt-fixture'\n[desktop]\nenabled-reasoning-efforts = ['max']\n";
+        crate::codex_config::write_codex_live_atomic(&auth, Some(original)).unwrap();
+        let auth_path = crate::codex_config::get_codex_config_dir().join("auth.json");
+        let auth_bytes = std::fs::read(&auth_path).unwrap();
+        let cache = crate::codex_config::get_codex_config_dir().join("models_cache.json");
+        std::fs::write(&cache,json!({"models":[{"slug":"gpt-fixture","context_window":222000,"native_tool":"preserve"}]}).to_string()).unwrap();
+        let relay = Provider::with_id(
+            "relay".into(),
+            "Relay".into(),
+            json!({"auth":{"OPENAI_API_KEY":"fixture-key"},"config":"model_provider = 'custom'\n[model_providers.custom]\nbase_url = 'https://example.test/v1'\n", "modelCatalog":{"models":[{"model":"x"}]}}),
+            None,
+        );
+        db.save_provider("codex", &relay).unwrap();
+        db.set_current_provider("codex", &relay.id).unwrap();
+        crate::settings::set_current_provider(&AppType::Codex, Some(&relay.id)).unwrap();
+        let service = ProxyService::new(db.clone());
+        service.start().await.unwrap();
+        let cfg = CodexModelRoutingConfig {
+            native_catalog_revision: Some(native_catalog.revision()),
+            models: vec![
+                ModelSelection {
+                    provider_id: codex_native_route::PROVIDER_ID.into(),
+                    model: "gpt-fixture".into(),
+                },
+                ModelSelection {
+                    provider_id: relay.id.clone(),
+                    model: "x".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        service.save_codex_model_routing_config(cfg).await.unwrap();
+        service.set_codex_model_routing_enabled(true).await.unwrap();
+        let doc: toml::Value = crate::codex_config::read_codex_config_text()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            doc["model_providers"]["custom"]["requires_openai_auth"].as_bool(),
+            Some(true)
+        );
+        assert!(doc["model_providers"]["custom"]
+            .get("experimental_bearer_token")
+            .is_none());
+        assert_eq!(std::fs::read(&auth_path).unwrap(), auth_bytes);
+        assert_eq!(
+            doc["desktop"]["enabled-reasoning-efforts"][0].as_str(),
+            Some("max")
+        );
+        // A discovery-cache overwrite by Codex must not lose the official route.
+        std::fs::write(&cache,json!({"models":[{"slug":"gpt-fixture@cc-switch-current-codex-login"},{"slug":"x@relay"}]}).to_string()).unwrap();
+        let cfg = db.get_codex_model_routing().unwrap();
+        let resolved = cfg
+            .resolve(&db, "gpt-fixture@cc-switch-current-codex-login")
+            .unwrap();
+        assert_eq!(resolved.provider.id, codex_native_route::PROVIDER_ID);
+        assert_eq!(
+            resolved.provider.settings_config["nativeCatalog"]["models"][0]["native_tool"],
+            "preserve"
+        );
+        assert_eq!(cfg.resolve(&db, "x@relay").unwrap().provider.id, "relay");
+        // Removing the last relay leaves a valid subscription-only route.
+        service
+            .remove_codex_provider_references_inner("relay")
+            .await
+            .unwrap();
+        assert_eq!(db.get_codex_model_routing().unwrap().models.len(), 1);
+        assert_eq!(std::fs::read(&auth_path).unwrap(), auth_bytes);
+        service
+            .set_codex_model_routing_enabled(false)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&auth_path).unwrap(), auth_bytes);
+        // Disabling the last takeover also stops the listener.
+        assert!(!service.is_running().await);
     }
 
     #[tokio::test]

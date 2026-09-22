@@ -164,7 +164,7 @@ describe("Codex routing action labels", () => {
         />,
       );
       const button = screen.getByRole("button", {
-        name: isCurrent ? "路由关闭后默认" : "设为关闭后默认",
+        name: isCurrent ? "路由关闭后使用" : "设为路由关闭后的默认供应商",
       });
       expect(button).toHaveClass("w-auto", "shrink-0");
       expect(button).not.toHaveClass("w-[4.5rem]");

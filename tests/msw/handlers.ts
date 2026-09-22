@@ -49,6 +49,23 @@ export const handlers = [
       repairError: null,
     }),
   ),
+  http.post(`${TAURI_ENDPOINT}/get_codex_native_routing_provider`, () =>
+    success({
+      status: "signedOut",
+      provider: null,
+      syncedAt: null,
+      catalogRevision: null,
+      cached: false,
+      error: null,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/start_codex_native_login`, () =>
+    success({ id: "fixture-login", status: "waiting", error: null }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_codex_native_login_status`, () =>
+    success({ id: "fixture-login", status: "succeeded", error: null }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/cancel_codex_native_login`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/get_codex_model_routing`, () =>
     success({
       enabled: false,

@@ -6,6 +6,8 @@ mod endpoints;
 mod gemini_auth;
 mod live;
 mod pi;
+mod routing_edit;
+pub use routing_edit::{CodexRoutingProviderEdit, CodexRoutingProviderEditResult};
 mod usage;
 
 use indexmap::IndexMap;
@@ -222,7 +224,7 @@ mod tests {
             .unwrap_or_else(|err| err.into_inner())
     }
 
-    fn with_test_home<T>(test: impl FnOnce(&AppState, &Path) -> T) -> T {
+    pub(super) fn with_test_home<T>(test: impl FnOnce(&AppState, &Path) -> T) -> T {
         let _guard = test_guard();
         let temp = tempfile::tempdir().expect("tempdir");
         let old_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
@@ -2112,7 +2114,10 @@ requires_openai_auth = true
         let profile: Value = read_json_file(&profile_path).expect("read desktop profile");
         assert_eq!(
             profile["inferenceGatewayBaseUrl"],
-            json!(format!("http://127.0.0.1:{}/claude-desktop", proxy_info.port)),
+            json!(format!(
+                "http://127.0.0.1:{}/claude-desktop",
+                proxy_info.port
+            )),
             "desktop profile should stay pointed at the local gateway during takeover"
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));
@@ -5246,7 +5251,26 @@ impl ProviderService {
             // Even an offline draft must not silently retain a deleted model or
             // an API-key station changed to an account-bound identity.
             if routing.references_provider(&provider.id) {
-                let mut providers = state.db.get_all_providers("codex")?;
+                let mut providers =
+                    crate::proxy::codex_native_route::providers_for_config(&state.db, &routing)?;
+                let native_id = crate::proxy::codex_native_route::PROVIDER_ID;
+                if routing
+                    .models
+                    .iter()
+                    .any(|entry| entry.provider_id == native_id)
+                    && !providers.contains_key(native_id)
+                {
+                    let saved = routing
+                        .models
+                        .iter()
+                        .filter(|entry| entry.provider_id == native_id)
+                        .map(|entry| entry.model.clone())
+                        .collect::<Vec<_>>();
+                    providers.insert(
+                        native_id.into(),
+                        crate::proxy::codex_native_route::placeholder_for_saved_models(&saved),
+                    );
+                }
                 providers.insert(provider.id.clone(), provider.clone());
                 routing.validate(&providers, false)?;
             }

@@ -494,7 +494,7 @@ export function ProviderCard({
                 <ProviderStatusBadge
                   tone="success"
                   label={t("provider.routingDefaultBadge", {
-                    defaultValue: "路由关闭后默认",
+                    defaultValue: "路由关闭后使用",
                   })}
                 />
               )}

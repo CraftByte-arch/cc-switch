@@ -1991,7 +1991,7 @@ fn push_env_codex_cli_candidates(candidates: &mut Vec<PathBuf>, seen: &mut HashS
     }
 }
 
-fn codex_cli_candidates() -> Vec<PathBuf> {
+pub(crate) fn codex_cli_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
 

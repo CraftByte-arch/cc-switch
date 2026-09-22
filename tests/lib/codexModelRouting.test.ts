@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { CodexCatalogModel, Provider } from "@/types";
 import {
   formatContextWindow,
+  nativeModelLabel,
+  routedModelLabel,
+  CODEX_NATIVE_ROUTE_ID,
   modelRoutingCombinationKey,
   modelRoutingModelLabel,
   modelRoutingOptions,
@@ -65,6 +68,48 @@ describe("codex model routing helpers", () => {
     expect(model.displayName).toBe("GPT 5.4 Fast");
     expect(model.contextWindow).toBe(262144);
     expect(model.reasoningLevels).toEqual(["low", "high"]);
+  });
+
+  it("formats numeric GPT official names before applying a prefix, without changing relay labels", () => {
+    const config = {
+      enabled: false,
+      providerName: "Router",
+      smartModelNames: true,
+      models: [],
+    };
+    for (const [raw, friendly] of [
+      ["GPT-6-Astra", "6 Astra"],
+      ["GPT-5.6-Sol", "5.6 Sol"],
+      ["GPT-5.4-Mini", "5.4 Mini"],
+      ["Custom Label", "Custom Label"],
+    ]) {
+      expect(nativeModelLabel(raw)).toBe(friendly);
+      expect(
+        routedModelLabel(config, CODEX_NATIVE_ROUTE_ID, "Official", raw, false),
+      ).toBe(`官方 · ${friendly}`);
+      expect(
+        routedModelLabel(
+          { ...config, showNativeModelPrefix: false },
+          CODEX_NATIVE_ROUTE_ID,
+          "Official",
+          raw,
+          true,
+        ),
+      ).toBe(friendly);
+      expect(
+        routedModelLabel(
+          { ...config, nativeModelPrefix: " My account " },
+          CODEX_NATIVE_ROUTE_ID,
+          "Official",
+          raw,
+          false,
+        ),
+      ).toBe(`My account · ${friendly}`);
+      expect(routedModelLabel(config, "relay", "Relay", raw, false)).toBe(raw);
+      expect(routedModelLabel(config, "relay", "Relay", raw, true)).toBe(
+        `Relay · ${raw}`,
+      );
+    }
   });
 
   it("formats effective context windows compactly", () => {

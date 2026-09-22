@@ -9,6 +9,31 @@ use crate::store::AppState;
 use std::str::FromStr;
 
 #[tauri::command]
+pub async fn get_codex_native_routing_provider(
+    state: tauri::State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<crate::proxy::codex_native_route::NativeRoutingStatus, String> {
+    crate::proxy::codex_native_route::sync(state.db.clone(), force.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn start_codex_native_login(
+    app: tauri::AppHandle,
+) -> Result<crate::proxy::codex_native_login::LoginStatus, String> {
+    crate::proxy::codex_native_login::start(app).await
+}
+#[tauri::command]
+pub async fn get_codex_native_login_status(
+    id: String,
+) -> Result<crate::proxy::codex_native_login::LoginStatus, String> {
+    crate::proxy::codex_native_login::status(&id).await
+}
+#[tauri::command]
+pub async fn cancel_codex_native_login(id: String) -> Result<(), String> {
+    crate::proxy::codex_native_login::cancel(&id).await
+}
+
+#[tauri::command]
 pub async fn get_codex_model_routing(
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::proxy::codex_model_routing::CodexModelRoutingConfig, String> {
@@ -22,6 +47,8 @@ pub async fn get_codex_model_routing(
 pub async fn get_codex_model_routing_capabilities(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<crate::proxy::codex_model_routing::ModelRoutingCapability>, String> {
+    // Native capabilities arrive with the account-checked discovery result.
+    // A corrupt/stale native cache must not block relay capabilities.
     let providers = state
         .db
         .get_all_providers("codex")

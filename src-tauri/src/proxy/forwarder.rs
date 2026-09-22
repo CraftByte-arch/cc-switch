@@ -98,6 +98,46 @@ fn validate_codex_official_authorization(
     }
 }
 
+// This route is subscription-only. Do not treat an API key as a ChatGPT login.
+// The official upstream remains responsible for signature/expiry verification.
+fn validate_native_subscription_credentials(headers: &http::HeaderMap) -> Result<(), ProxyError> {
+    use base64::Engine;
+    let valid = (|| {
+        let token = codex_bearer_access_token(headers)?;
+        let mut parts = token.split('.');
+        parts.next()?;
+        let payload = parts.next()?;
+        if parts.next()?.is_empty() || parts.next().is_some() {
+            return None;
+        }
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload)
+            .ok()?;
+        let claims: Value = serde_json::from_slice(&bytes).ok()?;
+        let account = claims
+            .pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id")?
+            .as_str()?;
+        let supplied = headers.get("chatgpt-account-id")?.to_str().ok()?;
+        Some(!account.is_empty() && account == supplied)
+    })()
+    .unwrap_or(false);
+    if valid {
+        Ok(())
+    } else {
+        Err(ProxyError::AuthError("官方订阅线路需要 Codex 当前的 ChatGPT 登录凭证，请在 Codex 登录并重启；不会自动切换到中转或 API 计费".into()))
+    }
+}
+
+fn strip_native_account_headers(headers: &mut http::HeaderMap) {
+    for name in [
+        "chatgpt-account-id",
+        "openai-organization",
+        "openai-project",
+    ] {
+        headers.remove(name);
+    }
+}
+
 pub struct ForwardResult {
     pub response: ProxyResponse,
     pub provider: Provider,
@@ -1249,6 +1289,21 @@ impl RequestForwarder {
                 expected_chatgpt_account_id.as_deref(),
                 managed_session_matches,
             )?;
+            if provider.id == super::codex_native_route::PROVIDER_ID {
+                validate_native_subscription_credentials(headers)?;
+                let (_, key, expired) = super::codex_native_auth::token_identity(
+                    codex_bearer_access_token(headers).unwrap_or(""),
+                )
+                .map_err(ProxyError::AuthError)?;
+                if expired
+                    || provider.settings_config["nativeAccountKey"].as_str() != Some(key.as_str())
+                {
+                    return Err(ProxyError::AuthError(
+                        "当前登录与已保存的官方目录不一致或登录已过期，请同步官方模型并保存后重试"
+                            .into(),
+                    ));
+                }
+            }
         }
 
         // 应用模型映射（独立于格式转换）
@@ -2313,6 +2368,11 @@ impl RequestForwarder {
             if let Ok(value) = http::HeaderValue::from_str(account_id) {
                 ordered_headers.insert("chatgpt-account-id", value);
             }
+        }
+
+        // OAuth workspace identity must never reach a third-party model route.
+        if self.codex_model_routed && !codex_official_auth_passthrough {
+            strip_native_account_headers(&mut ordered_headers);
         }
 
         reject_proxy_placeholder_for_managed_account_upstream(&url, &ordered_headers)?;
@@ -3888,6 +3948,96 @@ mod tests {
             icon_color: None,
             in_failover_queue: false,
         }
+    }
+
+    #[tokio::test]
+    async fn routed_relay_receives_only_its_key_not_the_native_login_or_workspace() {
+        use axum::{routing::post, Json, Router};
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let server = Router::new().route(
+            "/v1/responses",
+            post(move |headers: http::HeaderMap, Json(body): Json<Value>| {
+                let sender = sender.clone();
+                async move {
+                    sender.send((headers, body)).await.unwrap();
+                    Json(json!({"id":"fixture-response", "object":"response", "output":[]}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, server).await.unwrap();
+        });
+        let provider = Provider::with_id(
+            "relay".into(),
+            "Relay".into(),
+            json!({
+                "auth":{"OPENAI_API_KEY":"fixture-relay-key"},
+                "config":format!("model_provider = 'custom'\n[model_providers.custom]\nbase_url = 'http://{address}/v1'\nwire_api = 'responses'\n")
+            }),
+            None,
+        );
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "authorization",
+            "Bearer fixture-native-login".parse().unwrap(),
+        );
+        headers.insert("chatgpt-account-id", "fixture-workspace".parse().unwrap());
+        headers.insert("openai-project", "fixture-project".parse().unwrap());
+        let forwarder = test_forwarder(Duration::from_secs(5), Duration::from_secs(5))
+            .with_codex_model_routing(Some("gpt-relay".into()));
+        let result = forwarder
+            .forward(
+                &AppType::Codex,
+                &http::Method::POST,
+                &provider,
+                "/v1/responses",
+                &json!({"model":"gpt-relay@relay","input":[],"stream":false}),
+                &headers,
+                &Extensions::new(),
+                &super::super::providers::CodexAdapter::new(),
+            )
+            .await;
+        assert!(result.is_ok(), "{:#?}", result.err());
+        let (outgoing, body) = tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        task.abort();
+        assert_eq!(outgoing["authorization"], "Bearer fixture-relay-key");
+        assert!(!outgoing.contains_key("chatgpt-account-id"));
+        assert!(!outgoing.contains_key("openai-project"));
+        assert_eq!(body["model"], "gpt-relay");
+    }
+
+    #[test]
+    fn native_subscription_rejects_api_keys_placeholders_and_mismatched_workspaces() {
+        use base64::Engine;
+        let mut headers = http::HeaderMap::new();
+        for token in ["sk-fixture", "PROXY_MANAGED", "malformed"] {
+            headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+            assert!(validate_native_subscription_credentials(&headers).is_err());
+        }
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            json!({"https://api.openai.com/auth":{"chatgpt_account_id":"workspace-a"}}).to_string(),
+        );
+        headers.insert(
+            "authorization",
+            format!("Bearer header.{payload}.signature")
+                .parse()
+                .unwrap(),
+        );
+        headers.insert("chatgpt-account-id", "workspace-b".parse().unwrap());
+        assert!(validate_native_subscription_credentials(&headers).is_err());
+        headers.insert("chatgpt-account-id", "workspace-a".parse().unwrap());
+        assert!(validate_native_subscription_credentials(&headers).is_ok());
+        headers.insert("openai-organization", "org-fixture".parse().unwrap());
+        headers.insert("openai-project", "project-fixture".parse().unwrap());
+        strip_native_account_headers(&mut headers);
+        assert!(!headers.contains_key("chatgpt-account-id"));
+        assert!(!headers.contains_key("openai-organization"));
+        assert!(!headers.contains_key("openai-project"));
     }
 
     fn test_forwarder(

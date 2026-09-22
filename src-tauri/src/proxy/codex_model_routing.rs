@@ -47,8 +47,17 @@ pub struct CodexModelRoutingConfig {
     pub provider_name: String,
     /// Add provider names only for duplicate model labels, or for every model.
     pub smart_model_names: bool,
-    /// Ordered, unique provider/model routes; first entry is the initial default.
+    pub native_subscription_enabled: bool,
+    pub show_native_model_prefix: bool,
+    pub native_model_prefix: String,
+    pub native_catalog_revision: Option<String>,
+    /// Server-owned snapshot: candidate refresh must not alter live routes.
+    pub native_catalog: Option<super::codex_native_route::NativeCatalog>,
+    /// Ordered, unique provider/model routes. Display order is not the default.
     pub models: Vec<ModelSelection>,
+    /// Initial Codex model. Independent of `models` order; falls back to first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<ModelSelection>,
 }
 
 impl Default for CodexModelRoutingConfig {
@@ -57,7 +66,18 @@ impl Default for CodexModelRoutingConfig {
             enabled: false,
             provider_name: "CC Switch Router".into(),
             smart_model_names: true,
+            native_subscription_enabled: true,
+            show_native_model_prefix: true,
+            native_model_prefix: match crate::settings::get_settings().language.as_deref() {
+                Some("zh") | Some("zh-TW") => "官方",
+                Some("ja") => "公式",
+                _ => "Official",
+            }
+            .into(),
+            native_catalog_revision: None,
+            native_catalog: None,
             models: Vec::new(),
+            default_model: None,
         }
     }
 }
@@ -84,9 +104,24 @@ impl Database {
 }
 
 pub fn provider_is_eligible(provider: &Provider) -> bool {
+    if provider.id == super::codex_native_route::PROVIDER_ID {
+        return super::providers::is_codex_official_provider(provider)
+            && !provider.uses_managed_account_auth();
+    }
     // Native-login/account-bound routes have their own credential lifecycle.
     // Do not reuse inbound OAuth credentials across selected stations.
     !super::providers::is_codex_official_provider(provider) && !provider.uses_managed_account_auth()
+}
+
+fn provider_catalog(provider: &Provider) -> Result<Option<Value>, AppError> {
+    if let Some(catalog) = super::codex_native_route::catalog(provider) {
+        return Ok(Some(catalog));
+    }
+    crate::codex_config::codex_model_catalog_from_settings(
+        &provider.settings_config,
+        provider.settings_config["config"].as_str().unwrap_or(""),
+        super::providers::resolve_codex_catalog_tool_profile(provider),
+    )
 }
 
 pub fn has_model(provider: &Provider, model: &str) -> bool {
@@ -130,32 +165,22 @@ pub fn model_capabilities(providers: &IndexMap<String, Provider>) -> Vec<ModelRo
             }
         }
 
-        let config = provider
-            .settings_config
-            .get("config")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let profile = super::providers::resolve_codex_catalog_tool_profile(provider);
-        let context_windows = crate::codex_config::codex_model_catalog_from_settings(
-            &provider.settings_config,
-            config,
-            profile,
-        )
-        .ok()
-        .flatten()
-        .and_then(|catalog| catalog.get("models").and_then(Value::as_array).cloned())
-        .map(|models| {
-            models
-                .into_iter()
-                .filter_map(|entry| {
-                    Some((
-                        entry.get("slug")?.as_str()?.to_string(),
-                        entry.get("context_window")?.as_u64()?,
-                    ))
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
+        let context_windows = provider_catalog(provider)
+            .ok()
+            .flatten()
+            .and_then(|catalog| catalog.get("models").and_then(Value::as_array).cloned())
+            .map(|models| {
+                models
+                    .into_iter()
+                    .filter_map(|entry| {
+                        Some((
+                            entry.get("slug")?.as_str()?.to_string(),
+                            entry.get("context_window")?.as_u64()?,
+                        ))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
 
         capabilities.extend(model_ids.into_iter().map(|model| ModelRoutingCapability {
             provider_id: provider.id.clone(),
@@ -191,6 +216,41 @@ impl CodexModelRoutingConfig {
         self.models.iter().any(|entry| entry.provider_id == id)
     }
 
+    pub fn default_selection(&self) -> Option<&ModelSelection> {
+        self.default_model
+            .as_ref()
+            .and_then(|selected| {
+                self.models.iter().find(|entry| {
+                    entry.provider_id == selected.provider_id && entry.model == selected.model
+                })
+            })
+            .or_else(|| self.models.first())
+    }
+
+    pub fn rename_route(&mut self, provider_id: &str, from: &str, to: &str) {
+        for entry in &mut self.models {
+            if entry.provider_id == provider_id && entry.model == from {
+                entry.model = to.to_string();
+            }
+        }
+        if let Some(selected) = &mut self.default_model {
+            if selected.provider_id == provider_id && selected.model == from {
+                selected.model = to.to_string();
+            }
+        }
+    }
+
+    pub fn rebase_default(&mut self) {
+        if let Some(selected) = &self.default_model {
+            let exists = self.models.iter().any(|entry| {
+                entry.provider_id == selected.provider_id && entry.model == selected.model
+            });
+            if !exists {
+                self.default_model = self.models.first().cloned();
+            }
+        }
+    }
+
     pub fn validate(
         &self,
         providers: &IndexMap<String, Provider>,
@@ -209,6 +269,16 @@ impl CodexModelRoutingConfig {
         }
         if self.models.len() > 256 {
             return Err(AppError::InvalidInput("最多启用 256 个模型".into()));
+        }
+        if !self.native_subscription_enabled
+            && self
+                .models
+                .iter()
+                .any(|entry| entry.provider_id == super::codex_native_route::PROVIDER_ID)
+        {
+            return Err(AppError::InvalidInput(
+                "官方订阅已关闭，请移除官方模型后再保存".into(),
+            ));
         }
         let mut seen_selections = HashSet::new();
         let mut seen_routed_models = HashSet::new();
@@ -250,19 +320,75 @@ impl CodexModelRoutingConfig {
                 )));
             }
         }
+        if let Some(selected) = &self.default_model {
+            if !self.models.iter().any(|entry| {
+                entry.provider_id == selected.provider_id && entry.model == selected.model
+            }) {
+                return Err(AppError::InvalidInput(
+                    "默认模型必须是已选择的路由模型".into(),
+                ));
+            }
+        }
         Ok(())
+    }
+
+    fn display_label(
+        &self,
+        provider: &Provider,
+        model_name: &str,
+        counts: &HashMap<String, usize>,
+    ) -> String {
+        if provider.id == super::codex_native_route::PROVIDER_ID {
+            if self.show_native_model_prefix {
+                format!("{} · {}", self.native_model_prefix.trim(), model_name)
+            } else {
+                model_name.into()
+            }
+        } else if !self.smart_model_names || counts.get(model_name).copied().unwrap_or(0) > 1 {
+            format!("{} · {}", provider.name.trim(), model_name)
+        } else {
+            model_name.into()
+        }
     }
 
     pub fn validate_visible_combinations(
         &self,
         providers: &IndexMap<String, Provider>,
     ) -> Result<(), AppError> {
+        if self.native_subscription_enabled
+            && self.show_native_model_prefix
+            && (self.native_model_prefix.trim().is_empty()
+                || self.native_model_prefix.chars().count() > 32)
+        {
+            return Err(AppError::InvalidInput(
+                "官方模型前缀需为 1–32 个字符；不显示请关闭前缀开关".into(),
+            ));
+        }
+        let mut counts = HashMap::new();
+        for selection in &self.models {
+            if let Some(provider) = providers.get(&selection.provider_id) {
+                *counts
+                    .entry(model_display_name(provider, &selection.model))
+                    .or_insert(0) += 1;
+            }
+        }
+        let mut final_labels = HashMap::<String, bool>::new();
         let mut seen = HashSet::new();
         for entry in &self.models {
             let provider = providers.get(&entry.provider_id).ok_or_else(|| {
                 AppError::InvalidInput(format!("供应商已不存在：{}", entry.provider_id))
             })?;
             let display_name = model_display_name(provider, &entry.model);
+            let label = self.display_label(provider, &display_name, &counts);
+            let native = provider.id == super::codex_native_route::PROVIDER_ID;
+            if final_labels
+                .insert(label.clone(), native)
+                .is_some_and(|previous| native || previous)
+            {
+                return Err(AppError::InvalidInput(format!(
+                    "菜单名称“{label}”重复，请调整官方前缀或模型显示名称"
+                )));
+            }
             if !seen.insert((provider.name.trim().to_string(), display_name.clone())) {
                 return Err(AppError::InvalidInput(format!(
                     "“{} · {}”与另一个已选模型使用相同的供应商名称和模型显示名称，请先修改供应商名称或模型显示名称",
@@ -288,18 +414,8 @@ impl CodexModelRoutingConfig {
         let mut entries = Vec::with_capacity(self.models.len());
         for (index, selection) in self.models.iter().enumerate() {
             let provider = &providers[&selection.provider_id];
-            let config = provider
-                .settings_config
-                .get("config")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let profile = super::providers::resolve_codex_catalog_tool_profile(provider);
-            let catalog = crate::codex_config::codex_model_catalog_from_settings(
-                &provider.settings_config,
-                config,
-                profile,
-            )?
-            .ok_or_else(|| AppError::Config("供应商模型目录为空".into()))?;
+            let catalog = provider_catalog(provider)?
+                .ok_or_else(|| AppError::Config("供应商模型目录为空".into()))?;
             let mut entry = catalog["models"]
                 .as_array()
                 .and_then(|models| {
@@ -312,13 +428,7 @@ impl CodexModelRoutingConfig {
                     AppError::Config(format!("无法生成模型目录：{}", selection.model))
                 })?;
             let model_name = model_display_name(provider, &selection.model);
-            let display_name = if !self.smart_model_names
-                || display_name_counts.get(&model_name).copied().unwrap_or(0) > 1
-            {
-                format!("{} · {}", provider.name.trim(), model_name)
-            } else {
-                model_name
-            };
+            let display_name = self.display_label(provider, &model_name, &display_name_counts);
             entry["slug"] = json!(selection.routed_model_id());
             entry["display_name"] = json!(display_name);
             entry["description"] = json!(display_name);
@@ -351,11 +461,14 @@ impl CodexModelRoutingConfig {
                 }
             }
         };
-        let provider = db
-            .get_provider_by_id(&selection.provider_id, "codex")?
-            .ok_or_else(|| {
-                AppError::InvalidInput("模型对应的供应商已被删除，请重新配置路由".into())
-            })?;
+        let provider = if selection.provider_id == super::codex_native_route::PROVIDER_ID {
+            self.native_catalog
+                .as_ref()
+                .map(super::codex_native_route::from_catalog)
+        } else {
+            db.get_provider_by_id(&selection.provider_id, "codex")?
+        }
+        .ok_or_else(|| AppError::InvalidInput("模型对应的供应商已被删除，请重新配置路由".into()))?;
         if !provider_is_eligible(&provider) || !has_model(&provider, &selection.model) {
             return Err(AppError::InvalidInput(
                 "模型对应的供应商配置已变化，请重新配置路由".into(),
@@ -417,6 +530,7 @@ pub fn project_config(
         .or_else(|| {
             current.and_then(|model| config.models.iter().find(|entry| entry.model == model))
         })
+        .or_else(|| config.default_selection())
         .unwrap_or(&config.models[0]);
     let routed_model = selected.routed_model_id();
     if current != Some(routed_model.as_str()) {
@@ -448,8 +562,14 @@ pub fn project_config(
     table["name"] = toml_edit::value(config.provider_name.trim());
     table["base_url"] = toml_edit::value(base_url);
     table["wire_api"] = toml_edit::value("responses");
-    table["experimental_bearer_token"] = toml_edit::value("PROXY_MANAGED");
-    table["requires_openai_auth"] = toml_edit::value(false);
+    let native_login = config
+        .models
+        .iter()
+        .any(|entry| entry.provider_id == super::codex_native_route::PROVIDER_ID);
+    if !native_login {
+        table["experimental_bearer_token"] = toml_edit::value("PROXY_MANAGED");
+    }
+    table["requires_openai_auth"] = toml_edit::value(native_login);
     table["supports_websockets"] = toml_edit::value(false);
     providers.insert(PROVIDER_ID, toml_edit::Item::Table(table));
     Ok(doc.to_string())
@@ -458,6 +578,24 @@ pub fn project_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_subscription_disabled_rejects_native_selections_but_allows_relays() {
+        let old: CodexModelRoutingConfig = serde_json::from_value(json!({})).unwrap();
+        assert!(old.native_subscription_enabled);
+        let mut cfg = config("relay");
+        cfg.native_subscription_enabled = false;
+        cfg.native_model_prefix = String::new();
+        let providers = IndexMap::from([("relay".into(), provider("relay"))]);
+        assert!(cfg.validate(&providers, false).is_ok());
+        cfg.models[0].provider_id = super::super::codex_native_route::PROVIDER_ID.into();
+        assert!(cfg
+            .validate(&providers, false)
+            .unwrap_err()
+            .to_string()
+            .contains("官方订阅已关闭"));
+        let serialized = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(serialized["nativeSubscriptionEnabled"], false);
+    }
     fn provider(id: &str) -> Provider {
         Provider::with_id(
             id.into(),
@@ -490,6 +628,99 @@ mod tests {
         }
         provider
     }
+    #[test]
+    fn native_subscription_and_relay_keep_separate_auth_and_native_catalog() {
+        let mut native = Provider::with_id(
+            super::super::codex_native_route::PROVIDER_ID.into(),
+            "Official".into(),
+            json!({"auth":{}, "config":"", "modelCatalog":{"models":[{"model":"x"}]},
+            "nativeCatalog":{"models":[{"slug":"x", "context_window":200000,"native_tools":"unchanged"}]}}),
+            None,
+        );
+        native.category = Some("official".into());
+        let providers = IndexMap::from([
+            ("a".into(), provider("a")),
+            (native.id.clone(), native.clone()),
+        ]);
+        let mut cfg = config("a");
+        cfg.models.push(ModelSelection {
+            provider_id: native.id.clone(),
+            model: "x".into(),
+        });
+        cfg.validate(&providers, true).unwrap();
+        let catalog = cfg.catalog(&providers).unwrap();
+        assert_eq!(catalog["models"][1]["native_tools"], "unchanged");
+        assert_eq!(catalog["models"][1]["context_window"], 200000);
+        assert_eq!(
+            catalog["models"][1]["display_name"],
+            format!("{} · x", cfg.native_model_prefix)
+        );
+        let text = project_config("", &cfg, "http://127.0.0.1:15721/v1").unwrap();
+        let doc: toml::Value = text.parse().unwrap();
+        let custom = &doc["model_providers"]["custom"];
+        assert_eq!(custom["requires_openai_auth"].as_bool(), Some(true));
+        assert!(custom.get("experimental_bearer_token").is_none());
+        assert!(custom.get("env_key").is_none());
+        // Removing official routes restores key-only routing without requiring login.
+        cfg.models.pop();
+        let doc: toml::Value = project_config(&text, &cfg, "http://127.0.0.1:15721/v1")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            doc["model_providers"]["custom"]["requires_openai_auth"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            doc["model_providers"]["custom"]["experimental_bearer_token"].as_str(),
+            Some("PROXY_MANAGED")
+        );
+        native.meta = Some(crate::provider::ProviderMeta {
+            provider_type: Some("codex_oauth".into()),
+            ..Default::default()
+        });
+        assert!(!provider_is_eligible(&native));
+    }
+
+    #[test]
+    fn native_prefix_controls_do_not_change_relay_naming_and_reject_final_collisions() {
+        let native_catalog = super::super::codex_native_route::NativeCatalog {
+            account_key: "test".into(),
+            synced_at: 1,
+            requires_revalidation: false,
+            models: vec![json!({"slug":"x","display_name":"x"})],
+        };
+        let native = super::super::codex_native_route::from_catalog(&native_catalog);
+        let mut relay = provider("a");
+        relay.name = "订阅".into();
+        let providers = IndexMap::from([("a".into(), relay), (native.id.clone(), native.clone())]);
+        let mut cfg = config("a");
+        cfg.models.push(ModelSelection {
+            provider_id: native.id.clone(),
+            model: "x".into(),
+        });
+        cfg.native_model_prefix = "官方".into();
+        cfg.validate_visible_combinations(&providers).unwrap();
+        assert_eq!(
+            cfg.catalog(&providers).unwrap()["models"][1]["display_name"],
+            "官方 · x"
+        );
+        cfg.native_model_prefix = "订阅".into();
+        assert!(cfg.validate_visible_combinations(&providers).is_err());
+        cfg.show_native_model_prefix = false;
+        cfg.validate_visible_combinations(&providers).unwrap();
+        for smart in [true, false] {
+            cfg.smart_model_names = smart;
+            let catalog = cfg.catalog(&providers).unwrap();
+            assert_eq!(catalog["models"][0]["display_name"], "订阅 · x");
+            assert_eq!(catalog["models"][1]["display_name"], "x");
+            assert_eq!(catalog["models"][1]["slug"], format!("x@{}", native.id));
+        }
+        let legacy: CodexModelRoutingConfig = serde_json::from_str(r#"{"models":[]}"#).unwrap();
+        assert!(legacy.show_native_model_prefix);
+        assert!(!legacy.native_model_prefix.is_empty());
+    }
+
     #[test]
     fn defaults_and_reference_roundtrip() {
         let db = Database::memory().unwrap();
@@ -586,6 +817,58 @@ name = "Old"
         assert!(
             doc.get("model_reasoning_effort").is_none(),
             "routing may reset the per-model effort when the routed model identity changes"
+        );
+    }
+
+    #[test]
+    fn explicit_default_is_independent_of_list_order() {
+        let mut cfg = config("a");
+        cfg.models = vec![
+            ModelSelection {
+                provider_id: "a".into(),
+                model: "first".into(),
+            },
+            ModelSelection {
+                provider_id: "a".into(),
+                model: "second".into(),
+            },
+        ];
+        cfg.default_model = Some(ModelSelection {
+            provider_id: "a".into(),
+            model: "second".into(),
+        });
+        assert_eq!(
+            cfg.default_selection().map(|entry| entry.model.as_str()),
+            Some("second")
+        );
+        cfg.models.reverse();
+        assert_eq!(
+            cfg.default_selection().map(|entry| entry.model.as_str()),
+            Some("second")
+        );
+
+        let projected =
+            project_config("model = \"gone\"\n", &cfg, "http://127.0.0.1:15721/v1").unwrap();
+        let doc: toml::Value = toml::from_str(&projected).unwrap();
+        assert_eq!(doc["model"].as_str(), Some("second@a"));
+
+        let projected =
+            project_config("model = \"first@a\"\n", &cfg, "http://127.0.0.1:15721/v1").unwrap();
+        let doc: toml::Value = toml::from_str(&projected).unwrap();
+        assert_eq!(
+            doc["model"].as_str(),
+            Some("first@a"),
+            "a still-valid current model is kept even if it is not the default"
+        );
+
+        cfg.default_model = Some(ModelSelection {
+            provider_id: "missing".into(),
+            model: "gone".into(),
+        });
+        cfg.rebase_default();
+        assert_eq!(
+            cfg.default_model.as_ref().map(|entry| entry.model.as_str()),
+            Some("second")
         );
     }
 

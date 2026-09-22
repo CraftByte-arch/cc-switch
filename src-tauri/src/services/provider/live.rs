@@ -1571,6 +1571,39 @@ pub(crate) fn sync_live_for_provider_respecting_takeover(
     app_type: &AppType,
     provider: &Provider,
 ) -> Result<LiveSyncOutcome, AppError> {
+    sync_live_for_provider_respecting_takeover_impl(state, app_type, provider, false)
+}
+
+/// Caller holds the per-app switch lock for a provider + routing edit transaction.
+pub(crate) fn sync_live_for_provider_respecting_takeover_guarded(
+    state: &AppState,
+    app_type: &AppType,
+    provider: &Provider,
+) -> Result<LiveSyncOutcome, AppError> {
+    sync_live_for_provider_respecting_takeover_impl(state, app_type, provider, true)
+}
+
+fn sync_live_for_provider_respecting_takeover_impl(
+    state: &AppState,
+    app_type: &AppType,
+    provider: &Provider,
+    locked: bool,
+) -> Result<LiveSyncOutcome, AppError> {
+    let update_backup = || {
+        futures::executor::block_on(async {
+            if locked {
+                state
+                    .proxy_service
+                    .update_live_backup_from_provider_inner(app_type.as_str(), provider, None)
+                    .await
+            } else {
+                state
+                    .proxy_service
+                    .update_live_backup_from_provider(app_type.as_str(), provider)
+                    .await
+            }
+        })
+    };
     let has_live_backup =
         match futures::executor::block_on(state.db.get_live_backup(app_type.as_str())) {
             Ok(backup) => backup.is_some(),
@@ -1590,11 +1623,7 @@ pub(crate) fn sync_live_for_provider_respecting_takeover(
         // A stale backup must follow the provider too, otherwise a later restore
         // can resurrect the old URL and undo the live write we are making now.
         if has_live_backup {
-            if let Err(err) = futures::executor::block_on(
-                state
-                    .proxy_service
-                    .update_live_backup_from_provider(app_type.as_str(), provider),
-            ) {
+            if let Err(err) = update_backup() {
                 log::warn!(
                     "刷新 {} 残留 Live 备份失败（不影响本次 live 写入）: {err}",
                     app_type.as_str()
@@ -1607,12 +1636,7 @@ pub(crate) fn sync_live_for_provider_respecting_takeover(
 
     // Takeover owns live: update the restore source, and refresh proxy-safe
     // projections while the proxy is running.
-    futures::executor::block_on(
-        state
-            .proxy_service
-            .update_live_backup_from_provider(app_type.as_str(), provider),
-    )
-    .map_err(|e| AppError::Message(format!("更新 Live 备份失败: {e}")))?;
+    update_backup().map_err(|e| AppError::Message(format!("更新 Live 备份失败: {e}")))?;
 
     if !futures::executor::block_on(state.proxy_service.is_running()) {
         return Ok(LiveSyncOutcome::BackupOnly);

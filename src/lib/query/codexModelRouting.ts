@@ -11,6 +11,30 @@ export const codexModelRoutingCapabilitiesKey = [
   "codexModelRoutingCapabilities",
 ] as const;
 
+export const codexNativeRoutingKey = ["codexNativeRoutingProvider"] as const;
+export function useCodexNativeRoutingProvider(enabled = true) {
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: codexNativeRoutingKey,
+    queryFn: () => codexModelRoutingApi.getNativeProvider(false),
+    enabled,
+    staleTime: 0,
+    retry: false,
+    refetchInterval: enabled ? 60_000 : false,
+  });
+  const refresh = useMutation({
+    onMutate: () => client.cancelQueries({ queryKey: codexNativeRoutingKey }),
+    mutationFn: () => codexModelRoutingApi.getNativeProvider(true),
+    onSuccess: (data) => client.setQueryData(codexNativeRoutingKey, data),
+  });
+  return {
+    ...query,
+    refresh: refresh.mutateAsync,
+    isSyncing: query.isFetching || refresh.isPending,
+    syncError: refresh.error ?? query.error,
+  };
+}
+
 export function useCodexModelRouting(enabled = true) {
   return useQuery({
     queryKey: codexModelRoutingKey,
@@ -27,11 +51,14 @@ export function useCodexModelRoutingCapabilities(enabled = true) {
   });
 }
 
-export function useSaveCodexModelRouting() {
+export function useSaveCodexModelRouting(options?: {
+  requestRestart?: boolean;
+}) {
   const client = useQueryClient();
   return useMutation({
     onMutate: (config) => ({
       promptRestart:
+        (options?.requestRestart ?? true) &&
         codexRoutingOwnsLive(client) &&
         JSON.stringify(client.getQueryData(codexModelRoutingKey)) !==
           JSON.stringify(config),
@@ -59,6 +86,46 @@ export function useSetCodexModelRoutingEnabled() {
       client.invalidateQueries({
         queryKey: codexModelRoutingCapabilitiesKey,
       });
+    },
+  });
+}
+
+/** Persist a provider catalog/name edit. The routing dialog batches these until save. */
+export function useEditCodexRoutingProvider(
+  onSaved?: (
+    result: import("@/types/codexModelRouting").CodexRoutingProviderEditResult,
+    edit: import("@/types/codexModelRouting").CodexRoutingProviderEdit,
+  ) => void,
+  options?: { requestRestart?: boolean },
+) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: codexModelRoutingApi.editProvider,
+    onSuccess: async (result, edit) => {
+      onSaved?.(result, edit);
+      client.setQueryData(codexModelRoutingKey, result.config);
+      client.setQueryData<import("./queries").ProvidersQueryData>(
+        ["providers", "codex"],
+        (old) =>
+          old
+            ? {
+                ...old,
+                providers: {
+                  ...old.providers,
+                  [result.provider.id]: result.provider,
+                },
+              }
+            : old,
+      );
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["providers", "codex"] }),
+        client.invalidateQueries({
+          queryKey: codexModelRoutingCapabilitiesKey,
+        }),
+      ]);
+      if ((options?.requestRestart ?? true) && result.affectsLive) {
+        requestCodexMaintenance();
+      }
     },
   });
 }

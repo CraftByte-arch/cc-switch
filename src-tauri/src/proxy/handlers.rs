@@ -91,9 +91,7 @@ pub async fn handle_models(State(state): State<ProxyState>) -> Result<Json<Value
         .get_codex_model_routing()
         .map_err(|e| ProxyError::ConfigError(e.to_string()))?;
     if routing.enabled {
-        let providers = state
-            .db
-            .get_all_providers("codex")
+        let providers = super::codex_native_route::providers_for_config(&state.db, &routing)
             .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
         return routing
             .catalog(&providers)

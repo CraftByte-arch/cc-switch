@@ -1161,6 +1161,7 @@ function App() {
                       <CodexModelRoutingCard
                         providers={providers}
                         onEditProvider={setEditingProvider}
+                        detailEditorOpen={Boolean(editingProvider)}
                       />
                     )}
                     <ProviderList

@@ -100,7 +100,9 @@ impl ProxyService {
                     provider.name
                 ));
             }
-            if adapter.extract_auth(provider).is_none() {
+            if provider.id != crate::proxy::codex_native_route::PROVIDER_ID
+                && adapter.extract_auth(provider).is_none()
+            {
                 return Err(format!("{} 缺少 API Key，请先编辑供应商", provider.name));
             }
         }
@@ -155,9 +157,7 @@ impl ProxyService {
 
     pub(crate) async fn refresh_codex_model_routing_live(&self) -> Result<(), String> {
         let config = self.codex_model_routing_config()?;
-        let providers = self
-            .db
-            .get_all_providers("codex")
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, &config)
             .map_err(|e| e.to_string())?;
         self.project_codex_model_routing(&config, &providers)
             .await?;
@@ -173,9 +173,33 @@ impl ProxyService {
         let old = self.codex_model_routing_config()?;
         config.enabled = old.enabled;
         config.provider_name = config.provider_name.trim().to_string();
-        let providers = self
-            .db
-            .get_all_providers("codex")
+        config.native_model_prefix = config.native_model_prefix.trim().to_string();
+        if !config.native_subscription_enabled
+            && config
+                .models
+                .iter()
+                .any(|entry| entry.provider_id == crate::proxy::codex_native_route::PROVIDER_ID)
+        {
+            return Err("官方订阅已关闭，请移除官方模型后再保存".into());
+        }
+        config.native_catalog = if config
+            .models
+            .iter()
+            .any(|model| model.provider_id == crate::proxy::codex_native_route::PROVIDER_ID)
+        {
+            Some(
+                crate::proxy::codex_native_route::catalog_for_save(
+                    &self.db,
+                    config.native_catalog_revision.as_deref(),
+                )
+                .await?,
+            )
+        } else {
+            config.native_catalog_revision = None;
+            None
+        };
+
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, &config)
             .map_err(|e| e.to_string())?;
         let taken_over = self
             .db
@@ -231,11 +255,29 @@ impl ProxyService {
         }
         let mut config = old.clone();
         config.enabled = enabled;
+        if enabled
+            && config
+                .models
+                .iter()
+                .any(|model| model.provider_id == crate::proxy::codex_native_route::PROVIDER_ID)
+        {
+            let login = crate::proxy::codex_native_auth::read_login()
+                .await?
+                .filter(|login| !login.expired)
+                .ok_or("请先在 Codex 中登录并同步官方模型")?;
+            if config
+                .native_catalog
+                .as_ref()
+                .map(|catalog| &catalog.account_key)
+                != Some(&login.account_key)
+            {
+                return Err("官方模型配置属于其他登录或旧缓存，请同步后重新保存".into());
+            }
+        }
         if enabled {
-            let providers = self
-                .db
-                .get_all_providers("codex")
-                .map_err(|e| e.to_string())?;
+            let providers =
+                crate::proxy::codex_native_route::providers_for_config(&self.db, &config)
+                    .map_err(|e| e.to_string())?;
             let (_, url) = self.build_proxy_urls().await?;
             self.validate_model_routing_targets(&config, &providers, &url)?;
             config
@@ -273,17 +315,31 @@ impl ProxyService {
         &self,
         provider: &Provider,
     ) -> Result<(), AppError> {
+        self.update_codex_provider_in_model_routing_with_rename(provider, None)
+            .await
+    }
+
+    pub(crate) async fn update_codex_provider_in_model_routing_with_rename(
+        &self,
+        provider: &Provider,
+        rename: Option<(&str, &str)>,
+    ) -> Result<(), AppError> {
         let old_config = self.db.get_codex_model_routing()?;
-        let mut providers = self.db.get_all_providers("codex")?;
+        let mut providers =
+            crate::proxy::codex_native_route::providers_for_config(&self.db, &old_config)?;
         let old_provider = providers.insert(provider.id.clone(), provider.clone());
         let mut next_config = old_config.clone();
 
+        if let Some((from, to)) = rename {
+            next_config.rename_route(&provider.id, from, to);
+        }
         // Editing a provider's model catalog is allowed while routing is live.
         // Any selected route that no longer exists is removed atomically with
         // the provider edit instead of making the whole form impossible to save.
         next_config.models.retain(|entry| {
             entry.provider_id != provider.id || routing::has_model(provider, &entry.model)
         });
+        next_config.rebase_default();
         if next_config.models.is_empty() {
             return Err(AppError::InvalidInput(
                 "该供应商删除了模型路由中唯一启用的模型，请先在「管理模型」中选择其他模型后再保存"
@@ -294,9 +350,13 @@ impl ProxyService {
         next_config.validate_visible_combinations(&providers)?;
 
         let files = RouterFiles::capture().map_err(AppError::Message)?;
-        self.project_codex_model_routing(&next_config, &providers)
+        if let Err(error) = self
+            .project_codex_model_routing(&next_config, &providers)
             .await
-            .map_err(AppError::Message)?;
+        {
+            files.restore().map_err(AppError::Message)?;
+            return Err(AppError::Message(error));
+        }
         if let Err(error) = self.db.save_provider("codex", provider) {
             files.restore().map_err(AppError::Message)?;
             return Err(error);

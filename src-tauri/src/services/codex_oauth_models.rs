@@ -38,19 +38,146 @@ pub async fn fetch_models_with_token(
     Ok(parse_models(value))
 }
 
+/// Full native ModelInfo discovery for the current-login route. No custom URL,
+/// redirect, response-body error, or fallback to API-key billing is allowed.
+pub async fn fetch_native_catalog(
+    token: &str,
+    account_id: &str,
+) -> Result<Value, NativeCatalogError> {
+    let client = crate::proxy::http_client::get_without_redirects()
+        .map_err(|_| NativeCatalogError::Other("无法创建官方目录连接，请检查代理配置".into()))?;
+    let version = detected_native_client_version()
+        .await
+        .unwrap_or_else(|| CODEX_OAUTH_CLIENT_VERSION.into());
+    let mut response = build_models_request_with_version(&client, token, account_id, &version)
+        .send()
+        .await
+        .map_err(|_| NativeCatalogError::Other("获取官方模型超时或网络连接失败，请重试".into()))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(NativeCatalogError::LoginRequired);
+    }
+    if !status.is_success() {
+        return Err(NativeCatalogError::Other(format!(
+            "官方目录请求失败（HTTP {}），未替换已有目录",
+            status.as_u16()
+        )));
+    }
+    const LIMIT: usize = 16 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| NativeCatalogError::Other("官方目录接收中断，请重试".into()))?
+    {
+        if bytes.len() + chunk.len() > LIMIT {
+            return Err(NativeCatalogError::Other("官方目录超过大小限制".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|_| NativeCatalogError::Other("官方目录格式无法解析，未替换已有目录".into()))
+}
+
+pub enum NativeCatalogError {
+    LoginRequired,
+    Other(String),
+}
+
 fn build_models_request(
     client: &reqwest::Client,
     token: &str,
     account_id: &str,
 ) -> reqwest::RequestBuilder {
+    build_models_request_with_version(client, token, account_id, CODEX_OAUTH_CLIENT_VERSION)
+}
+
+fn build_models_request_with_version(
+    client: &reqwest::Client,
+    token: &str,
+    account_id: &str,
+    version: &str,
+) -> reqwest::RequestBuilder {
     client
         .get(CODEX_OAUTH_MODELS_URL)
-        .query(&[("client_version", CODEX_OAUTH_CLIENT_VERSION)])
+        .query(&[("client_version", version)])
         .header("Authorization", format!("Bearer {token}"))
         .header("originator", CODEX_OAUTH_ORIGINATOR)
-        .header("version", CODEX_OAUTH_CLIENT_VERSION)
+        .header("version", version)
         .header("chatgpt-account-id", account_id)
         .timeout(Duration::from_secs(CODEX_OAUTH_FETCH_TIMEOUT_SECS))
+}
+
+// Query only --version, never auth/login or a model request. Keep model discovery
+// compatible with the installed desktop/CLI rather than a frozen CCS version.
+async fn detected_native_client_version() -> Option<String> {
+    native_client_command().await.map(|(_, version)| version)
+}
+
+pub(crate) async fn native_client_command() -> Option<(std::path::PathBuf, String)> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut candidates = Vec::new();
+        #[cfg(target_os = "macos")]
+        {
+            let path = tokio::time::timeout(
+                Duration::from_secs(2),
+                tokio::process::Command::new("/usr/bin/osascript")
+                    .args([
+                        "-e",
+                        "POSIX path of (path to application id \"com.openai.codex\")",
+                    ])
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await;
+            if let Ok(Ok(output)) = path {
+                if output.status.success() {
+                    if let Ok(path) = String::from_utf8(output.stdout) {
+                        candidates.push(
+                            std::path::PathBuf::from(path.trim()).join("Contents/Resources/codex"),
+                        );
+                    }
+                }
+            }
+        }
+        candidates.extend(crate::codex_config::codex_cli_candidates());
+        for candidate in candidates {
+            let mut command = tokio::process::Command::new(&candidate);
+            command.arg("--version").kill_on_drop(true);
+            #[cfg(target_os = "windows")]
+            command.creation_flags(0x08000000);
+            if let Ok(Ok(output)) =
+                tokio::time::timeout(Duration::from_secs(2), command.output()).await
+            {
+                if output.status.success() {
+                    if let Some(version) =
+                        parsed_client_version(&String::from_utf8_lossy(&output.stdout))
+                    {
+                        return Some((candidate, version));
+                    }
+                }
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+fn parsed_client_version(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|part| {
+            let core = part.split('-').next().unwrap_or("");
+            let numbers: Vec<_> = core.split('.').collect();
+            numbers.len() == 3
+                && numbers.iter().all(|number| number.parse::<u32>().is_ok())
+                && part.len() < 96
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b".-+".contains(&c))
+        })
+        .map(str::to_owned)
 }
 
 fn parse_models(value: Value) -> Vec<FetchedModel> {
@@ -168,6 +295,26 @@ mod tests {
             "slug": "gpt-6-astra", "minimal_client_version": "0.153.0"
         }]}));
         assert_eq!(models[0].id, "gpt-6-astra");
+    }
+
+    #[test]
+    fn native_discovery_uses_detected_version_without_changing_managed_accounts() {
+        let version = parsed_client_version("codex-cli 0.155.0-alpha.9.2\n").unwrap();
+        let request = build_models_request_with_version(
+            &reqwest::Client::new(),
+            "fixture",
+            "workspace",
+            &version,
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.headers()["version"], version);
+        assert_eq!(request.url().host_str(), Some("chatgpt.com"));
+        assert!(request
+            .url()
+            .query_pairs()
+            .any(|(key, value)| key == "client_version" && value == version));
+        assert!(parsed_client_version("error loading executable").is_none());
     }
 
     #[test]

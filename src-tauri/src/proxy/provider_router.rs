@@ -169,6 +169,13 @@ impl ProviderRouter {
             breaker.record_failure(used_half_open_permit).await;
         }
 
+        // The current-login route is virtual: it has no providers row and must
+        // not be inserted into provider_health (which has a provider FK).
+        // Keep circuit state in memory, including HalfOpen permit release.
+        if app_type == "codex" && provider_id == super::codex_native_route::PROVIDER_ID {
+            return Ok(());
+        }
+
         // 3. 更新数据库健康状态（使用配置的阈值）
         self.db
             .update_provider_health_with_threshold(
@@ -367,6 +374,22 @@ mod tests {
                 None => env::remove_var("CC_SWITCH_TEST_HOME"),
             }
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn native_route_health_does_not_require_a_saved_provider() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db.clone());
+        let id = super::super::codex_native_route::PROVIDER_ID;
+        for success in [false, true] {
+            router
+                .record_result(id, "codex", false, success, None)
+                .await
+                .unwrap();
+        }
+        assert!(db.get_provider_by_id(id, "codex").unwrap().is_none());
     }
 
     #[tokio::test]

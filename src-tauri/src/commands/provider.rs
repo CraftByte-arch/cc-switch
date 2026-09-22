@@ -74,6 +74,22 @@ pub async fn update_provider(
     .map_err(|e| format!("供应商更新任务执行失败: {e}"))?
 }
 
+/// The router edits only provider-owned fields, not a second catalog copy.
+#[tauri::command]
+pub async fn edit_codex_routing_provider(
+    app_handle: tauri::AppHandle,
+    edit: crate::services::provider::CodexRoutingProviderEdit,
+) -> Result<crate::services::provider::CodexRoutingProviderEditResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle
+            .try_state::<AppState>()
+            .ok_or_else(|| "应用状态不可用".to_string())?;
+        ProviderService::edit_codex_routing_provider(state.inner(), edit).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("供应商更新任务执行失败: {e}"))?
+}
+
 #[tauri::command]
 pub fn delete_provider(
     state: State<'_, AppState>,

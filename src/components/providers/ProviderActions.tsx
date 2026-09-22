@@ -158,8 +158,10 @@ export function ProviderActions({
           <Play className="h-4 w-4" />
         ),
         text: isCurrent
-          ? t("provider.routingDefault", { defaultValue: "路由关闭后默认" })
-          : t("provider.setRoutingDefault", { defaultValue: "设为关闭后默认" }),
+          ? t("provider.routingDefault", { defaultValue: "路由关闭后使用" })
+          : t("provider.setRoutingDefault", {
+              defaultValue: "设为路由关闭后的默认供应商",
+            }),
       };
     }
 

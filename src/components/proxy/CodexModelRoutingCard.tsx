@@ -17,9 +17,11 @@ import { CodexModelRoutingDialog } from "./CodexModelRoutingDialog";
 export function CodexModelRoutingCard({
   providers,
   onEditProvider,
+  detailEditorOpen = false,
 }: {
   providers: Record<string, Provider>;
   onEditProvider: (provider: Provider) => void;
+  detailEditorOpen?: boolean;
 }) {
   const { t } = useTranslation();
   const query = useCodexModelRouting();
@@ -55,17 +57,25 @@ export function CodexModelRoutingCard({
     <>
       <section
         className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-default bg-card px-4 py-3"
-        aria-label={t("codexRouting.title", { defaultValue: "Codex 模型路由" })}
+        aria-label={t("codexRouting.cardTitle", {
+          defaultValue: "Codex 聚合模型路由",
+        })}
       >
         <div className="flex min-w-0 items-center gap-3">
           <Network className="h-5 w-5 shrink-0 text-primary" />
           <div>
             <h2 className="text-sm font-semibold">
-              {t("codexRouting.title", { defaultValue: "Codex 模型路由" })}
+              {t("codexRouting.cardTitle", {
+                defaultValue: "Codex 聚合模型路由",
+              })}
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {active
-                ? `${query.data?.providerName} · ${t("codexRouting.modelCount", { count: query.data?.models.length, defaultValue: "{{count}} 个模型" })}`
+            <p className="mt-1 break-words text-xs text-muted-foreground">
+              {query.data
+                ? t("codexRouting.routeNameSummary", {
+                    name: query.data.providerName,
+                    count: query.data.models.length,
+                    defaultValue: "聚合路由名称：{{name}} · {{count}} 个模型",
+                  })
                 : t("codexRouting.offlineHint", {
                     defaultValue:
                       "从已有供应商选择模型；未启动服务也能提前配置。",
@@ -120,6 +130,7 @@ export function CodexModelRoutingCard({
         providers={providers}
         active={active}
         onEditProvider={onEditProvider}
+        detailEditorOpen={detailEditorOpen}
       />
       <ConfirmDialog
         isOpen={confirmEnable}

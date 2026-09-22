@@ -1,9 +1,15 @@
 import type { CodexCatalogModel, Provider } from "@/types";
-import type { CodexModelSelection } from "@/types/codexModelRouting";
+import type {
+  CodexModelRoutingConfig,
+  CodexModelSelection,
+} from "@/types/codexModelRouting";
 import { resolveCodexOfficialIdentity } from "./providerCapabilities";
+
+export const CODEX_NATIVE_ROUTE_ID = "cc-switch-current-codex-login";
 
 export function isModelRoutingProvider(provider: Provider): boolean {
   const identity = resolveCodexOfficialIdentity("codex", provider);
+  if (provider.id === CODEX_NATIVE_ROUTE_ID) return identity === "native_login";
   return (
     identity !== "native_login" &&
     identity !== "managed_account" &&
@@ -31,6 +37,10 @@ export function modelRoutingOptions(provider: Provider): CodexCatalogModel[] {
         reasoningLevels: row.reasoningLevels ?? row.reasoning_levels,
         defaultReasoningLevel:
           row.defaultReasoningLevel ?? row.default_reasoning_level,
+        supportsParallelToolCalls:
+          row.supportsParallelToolCalls ?? row.supports_parallel_tool_calls,
+        inputModalities: row.inputModalities ?? row.input_modalities,
+        baseInstructions: row.baseInstructions ?? row.base_instructions,
       },
     ];
   });
@@ -73,4 +83,33 @@ export function selectRoutedModel(
     (entry) => modelRoutingSelectionKey(entry) === targetKey,
   );
   return exists ? selections : [...selections, target];
+}
+
+/** Native labels only; relay custom display names must remain byte-for-byte intact. */
+export function nativeModelLabel(name: string): string {
+  const trimmed = name.trim();
+  if (!/^gpt-\d/i.test(trimmed)) return trimmed;
+  return trimmed
+    .slice(4)
+    .split("-")
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
+export function routedModelLabel(
+  config: CodexModelRoutingConfig,
+  providerId: string,
+  providerName: string,
+  modelName: string,
+  duplicate: boolean,
+): string {
+  if (providerId === CODEX_NATIVE_ROUTE_ID) {
+    const label = nativeModelLabel(modelName);
+    return (config.showNativeModelPrefix ?? true)
+      ? `${(config.nativeModelPrefix ?? "官方").trim()} · ${label}`
+      : label;
+  }
+  return !config.smartModelNames || duplicate
+    ? `${providerName.trim()} · ${modelName}`
+    : modelName;
 }
