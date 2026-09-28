@@ -3352,6 +3352,7 @@
     "prefixSummary": "前綴：{{prefix}}",
     "prefixOff": "無前綴",
     "cardTitle": "Codex 聚合模型路由",
+    "cardIntro": "同時接入多個供應商和官方訂閱；設定生效後，在 Codex 內依模型切換來源，無需每次重新啟動。",
     "routeNameSummary": "聚合路由名稱：{{name}} · {{count}} 個模型",
     "enabledToast": "模型路由已啟用。首次接管後請重新開啟 Codex，讓它載入統一模型目錄。",
     "disabledToast": "模型路由已關閉，Codex 設定已恢復。",
@@ -3389,7 +3390,9 @@
       "modelAdded": "已新增 {{model}}",
       "modelRemoved": "已移除 {{model}}",
       "nameRequired": "請填寫 Provider 顯示名稱後再儲存。",
-      "activeNeedsModel": "路由執行中，請至少保留一個模型。"
+      "activeNeedsModel": "路由執行中，請至少保留一個模型。",
+      "pickToEnable": "點選至少 1 個模型，儲存後回到列表即可開啟。",
+      "clickToAdd": "點擊模型卡片即可加入路由。第一個選中的會作為預設，之後可在模型排序裡調整。"
     },
     "subscription": {
       "enable": "啟用官方訂閱",
@@ -3410,7 +3413,10 @@
     "expiredOfficialMessage": "已選清單裡還有官方模型，目前登入已失效，不能直接儲存。可以重新登入後再儲存，或移除這些官方模型並關閉官方訂閱。",
     "expiredOfficialLogin": "重新登入",
     "expiredOfficialRemove": "移除官方模型並關閉訂閱",
-    "providerNameHint": "Codex 模型選單裡顯示的聚合路由名稱。內部 Provider ID 固定為 custom，更換模型來源不會改變這個身分。"
+    "providerNameHint": "Codex 模型選單裡顯示的聚合路由名稱。內部 Provider ID 固定為 custom，更換模型來源不會改變這個身分。",
+    "selectedEmpty": "模型排序",
+    "pickModelsFirst": "還沒有選擇模型。點開關或「管理模型」去挑選。",
+    "pickModelsFirstHint": "請先選擇模型"
   },
   "codexMaintenance": {
     "actions": "Codex 維護",
@@ -3490,5 +3496,134 @@
       "restart": "重新啟動 Codex"
     },
     "progressRepairing": "正在修復會話資料…"
+  },
+  "codexGuide": {
+    "saveProviderHint": "點下方反白的「新增」按鈕儲存供應商。成功後，引導會回到底部。",
+    "saveRoutingHint": "點下方反白的「儲存路由設定」按鈕。成功後，引導會回到底部。",
+    "guideLabel": "設定引導",
+    "targetHint": "目前操作：請操作橘色框內的控制項",
+    "setupNote": "首次啟用或修改接入設定後，請依提示修復工作階段並重新啟動 Codex；之後切換已設定的模型無需重新啟動。官方訂閱可選，不使用則無需登入官方帳號。",
+    "recommended": "推薦 · 完整流程",
+    "replay": "新手引導",
+    "providerOnly": "僅啟用供應商",
+    "routing": "聚合中轉（聚合路由）",
+    "close": "關閉引導",
+    "skip": "跳過",
+    "next": "下一步",
+    "done": "完成",
+    "progress": "{{current}} / {{total}}",
+    "steps": {
+      "add-provider": {
+        "title": "新增供應商",
+        "body": "右上角的加號是新增入口。點擊加號或「下一步」進入新建頁面。這裡不會自動儲存設定。"
+      },
+      "provider-preset": {
+        "title": "選擇供應商預設",
+        "body": "選擇你使用的供應商；沒有對應項就選「自訂設定」。選好後點下一步填寫名稱。"
+      },
+      "provider-name": {
+        "title": "填寫供應商名稱",
+        "body": "填寫方便辨認的名稱，例如「我的中轉」。也可以保留預設提供的名稱。"
+      },
+      "api-key": {
+        "title": "填寫 API Key",
+        "body": "貼上供應商提供的 API Key，不是帳號登入密碼。金鑰保持隱藏顯示，引導不會記錄金鑰。"
+      },
+      "api-url": {
+        "title": "填寫 API 位址",
+        "body": "填寫供應商提供的 API 介面位址，不是網站首頁。預設已填寫時，核對後即可繼續。"
+      },
+      "fetch-models": {
+        "title": "取得模型清單",
+        "body": "點擊「取得模型清單」。失敗可重試；若供應商不支援取得，選「手動填寫」繼續。"
+      },
+      "model-mapping": {
+        "title": "新增模型映射",
+        "body": "點「新增模型」：顯示名用於 Codex 選單，實際請求模型填入供應商支援的模型 ID，也可從取得的清單選擇。"
+      },
+      "save-provider": {
+        "title": "儲存供應商",
+        "body": "核對後點擊底部「新增」。只有儲存成功才能繼續。依表單提示補齊欄位，下一步不會代你儲存。"
+      },
+      "enable-provider": {
+        "title": "啟用這家供應商",
+        "body": "點所選供應商卡片上的「啟用」，設為目前供應商。已啟用可直接繼續；確認提示由你決定。"
+      },
+      "enter-routing": {
+        "title": "認識聚合模型路由",
+        "body": "聚合中轉可同時接入多個供應商和官方訂閱，不必先啟用單一供應商。設定生效後，在 Codex 內切換已設定的模型與來源無需重新啟動。點「管理模型」或下一步進入詳情。"
+      },
+      "routing-sources": {
+        "title": "了解模型來源",
+        "body": "可選模型按供應商分組。官方訂閱是可選來源，不用就可關閉，不需要登入；中轉模型使用對應供應商的設定。"
+      },
+      "select-models": {
+        "title": "選取要使用的模型",
+        "body": "點模型的選取按鈕，圓點會變成勾選。至少選一個，確認數量後再繼續；不會自動替你選取。"
+      },
+      "sort-models": {
+        "title": "調整模型排序",
+        "body": "拖動左側手柄調整選單順序，或使用上方的排序方式。只有一個模型時可直接繼續。"
+      },
+      "default-model": {
+        "title": "設定預設模型",
+        "body": "點「設為預設模型」。預設模型決定預設使用誰，排序只決定選單順序；也可以保留目前的預設標記。"
+      },
+      "save-routing": {
+        "title": "儲存聚合設定",
+        "body": "點底部「儲存設定」。沒有改動且已儲存時可直接繼續。儲存草稿不等於啟用路由。"
+      },
+      "enable-config": {
+        "title": "啟用聚合路由",
+        "body": "打開卡片右側開關，閱讀並確認設定接管提示。這會改變 Codex 使用的設定，由你主動確認執行。"
+      },
+      "enable-proxy": {
+        "title": "檢查本機中轉路由",
+        "body": "啟用聚合路由會啟動本機中轉。已開啟可直接繼續；未執行時檢查開關，或返回聚合路由重新啟用。"
+      },
+      "repair-sessions": {
+        "title": "按需修復舊工作階段",
+        "body": "舊工作階段不可見時，點修復查看檢查結果後確認。不需要可跳過；引導不會自動修復或遷移。"
+      },
+      "restart": {
+        "title": "重新啟動 Codex 載入設定",
+        "body": "準備好後點「重新啟動 Codex」，確認後執行。正在工作可暫時跳過；下一步不會自動重新啟動應用。"
+      }
+    },
+    "welcomeTitle": "設定你的 Codex",
+    "welcomeBody": "預設推薦完整的聚合中轉流程：從新增供應商、模型映射，到選擇模型、排序和啟用。每一步由你確認，不會自動儲存、啟用或重新啟動。",
+    "providerDescription": "使用一家供應商的模型，完成新增和啟用即可。",
+    "routingDescription": "同時使用多個供應商 + 官方訂閱，彙整到同一份模型選單。設定生效後，在 Codex 內切換模型和來源，無需每次重新啟動。",
+    "providerSource": "從哪裡開始？",
+    "createProvider": "新增供應商",
+    "resume": "繼續上次引導",
+    "start": "開始引導",
+    "previous": "上一步",
+    "exit": "退出引導",
+    "minimize": "收起",
+    "expand": "展開",
+    "officialHint": "目前是官方或託管登入供應商：透過帳號區域完成授權，不需要手填 API Key 或介面位址；沒有模型映射區域時可直接繼續。",
+    "ready": "可繼續下一步",
+    "waiting": "完成此操作後繼續",
+    "targetMissing": "暫未找到對應控制項。可以重新定位，或退出引導後繼續操作。",
+    "locate": "重新定位",
+    "noModels": "如果這裡沒有模型，請先為供應商新增模型映射；官方訂閱可選，不使用就不需要登入。",
+    "backToModels": "返回選取模型",
+    "providerSaved": "供應商已儲存，繼續",
+    "discardBack": "返回上一頁會關閉目前詳情頁，未儲存的輸入將遺失。退出引導則會保留目前頁面。",
+    "keepEditing": "繼續編輯",
+    "discardAndBack": "放棄並返回",
+    "manualModels": "手動填寫",
+    "skipStep": "暫時跳過",
+    "viewResult": "查看結果",
+    "summaryTitle": "引導結束",
+    "configured": "已確認啟用狀態。若本次尚未重新啟動，可稍後在主頁面手動重新啟動 Codex。",
+    "notConfigured": "你已瀏覽完引導，但尚未確認設定已啟用。跳過的操作不會被記為設定成功，可隨時重新開啟引導。",
+    "fetch": {
+      "idle": "填寫金鑰和位址後，點擊醒目標示的「取得模型清單」。",
+      "loading": "正在取得模型清單…",
+      "success": "取得完成，傳回的模型數量",
+      "error": "取得失敗，請檢查表單中的金鑰、位址和錯誤提示後重試，也可以手動填寫模型。"
+    }
   }
 }

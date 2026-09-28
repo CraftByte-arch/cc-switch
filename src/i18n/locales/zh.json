@@ -3293,7 +3293,9 @@
       "modelAdded": "已添加 {{model}}",
       "modelRemoved": "已移除 {{model}}",
       "nameRequired": "请填写 Provider 显示名称后再保存。",
-      "activeNeedsModel": "路由运行中，请至少保留一个模型。"
+      "activeNeedsModel": "路由运行中，请至少保留一个模型。",
+      "pickToEnable": "点选至少 1 个模型，保存后回到列表即可开启。",
+      "clickToAdd": "点击模型卡片即可加入路由。第一个选中的会作为默认，之后可在模型排序里调整。"
     },
     "title": "Codex 模型路由",
     "providerName": "Provider 显示名称",
@@ -3334,6 +3336,7 @@
     "nativeNameExample": "菜单效果（示例）：{{name}}",
     "editNativePrefix": "修改官方前缀",
     "cardTitle": "Codex 聚合模型路由",
+    "cardIntro": "同时接入多个供应商和官方订阅；配置生效后，在 Codex 内按模型切换来源，无需每次重启。",
     "routeNameSummary": "聚合路由名称：{{name}} · {{count}} 个模型",
     "subscription": {
       "enable": "启用官方订阅",
@@ -3409,7 +3412,10 @@
     "expiredOfficialMessage": "已选列表里还有官方模型，当前登录已失效，不能直接保存。可以重新登录后再保存，或移除这些官方模型并关闭官方订阅。",
     "expiredOfficialLogin": "重新登录",
     "expiredOfficialRemove": "移除官方模型并关闭订阅",
-    "providerNameHint": "Codex 模型菜单里显示的聚合路由名称。内部 Provider ID 固定为 custom，换模型来源不会改变这个身份。"
+    "providerNameHint": "Codex 模型菜单里显示的聚合路由名称。内部 Provider ID 固定为 custom，换模型来源不会改变这个身份。",
+    "selectedEmpty": "模型排序",
+    "pickModelsFirst": "还没选择模型。点开关或「管理模型」去挑选。",
+    "pickModelsFirstHint": "请先选择模型"
   },
   "codexMaintenance": {
     "actions": "Codex 维护",
@@ -3489,5 +3495,134 @@
       "restart": "重启 Codex"
     },
     "progressRepairing": "正在修复会话数据…"
+  },
+  "codexGuide": {
+    "saveProviderHint": "点击下方高亮的「添加」按钮保存供应商。保存成功后，引导会回到底部。",
+    "saveRoutingHint": "点击下方高亮的「保存路由配置」按钮。保存成功后，引导会回到底部。",
+    "guideLabel": "配置引导",
+    "targetHint": "当前操作：请操作橙色框内的控件",
+    "setupNote": "首次启用或修改接入配置后，请按提示修复会话并重启 Codex；之后切换已配置的模型无需重启。官方订阅按需接入，不使用则无需登录官方账号。",
+    "recommended": "推荐 · 全流程",
+    "replay": "新手引导",
+    "providerOnly": "仅启用供应商",
+    "routing": "聚合中转（聚合路由）",
+    "close": "关闭引导",
+    "skip": "跳过",
+    "next": "下一步",
+    "done": "完成",
+    "progress": "{{current}} / {{total}}",
+    "steps": {
+      "add-provider": {
+        "title": "添加供应商",
+        "body": "右上角的加号是添加入口。点击加号或「下一步」进入新建页面。这里不会自动保存任何配置。"
+      },
+      "provider-preset": {
+        "title": "选择供应商预设",
+        "body": "找到你使用的供应商并选择预设；没有对应项就选「自定义配置」。选好后点击下一步填写名称。"
+      },
+      "provider-name": {
+        "title": "填写供应商名称",
+        "body": "填写一个方便辨认的名称，例如「我的中转」。预设已填写的名称也可以直接保留。"
+      },
+      "api-key": {
+        "title": "填写 API Key",
+        "body": "在高亮输入框粘贴供应商提供的 API Key，不是账号登录密码。密钥保持隐藏显示，引导不会记录密钥。"
+      },
+      "api-url": {
+        "title": "填写 API 地址",
+        "body": "填写供应商提供的 API 接口地址，不是网站首页。预设已经填写时，核对后即可继续。"
+      },
+      "fetch-models": {
+        "title": "获取模型列表",
+        "body": "点击「获取模型列表」，读取该供应商支持的模型。失败时可以重试；如果供应商不支持获取，选择「手动填写」继续。"
+      },
+      "model-mapping": {
+        "title": "添加模型映射",
+        "body": "点击「添加模型」：显示名用于 Codex 菜单，实际请求模型填写供应商支持的模型 ID，也可从获取的列表中选择。"
+      },
+      "save-provider": {
+        "title": "保存供应商",
+        "body": "核对后点击页面底部「添加」。只有保存成功才能继续。表单报错时按提示补齐；下一步不会替你保存。"
+      },
+      "enable-provider": {
+        "title": "启用这家供应商",
+        "body": "点击所选供应商卡片上的「启用」，将它设为当前供应商。如果已经启用，直接继续即可。确认提示由你决定，不会自动执行。"
+      },
+      "enter-routing": {
+        "title": "认识聚合模型路由",
+        "body": "聚合中转可同时接入多个供应商和官方订阅，不必先启用某一家。配置生效后，在 Codex 内切换已配置的模型与来源无需重启。点击「管理模型」或下一步打开详情。"
+      },
+      "routing-sources": {
+        "title": "了解模型来源",
+        "body": "「可选模型」按供应商分组。官方订阅只是可选来源：不用官方模型可以关闭，不需要登录；中转模型使用对应供应商的配置。"
+      },
+      "select-models": {
+        "title": "选中要使用的模型",
+        "body": "点击模型卡片的选择按钮，圆点会变成对勾。至少选一个模型，确认已选数量后再继续；不会自动替你选择。"
+      },
+      "sort-models": {
+        "title": "调整模型排序",
+        "body": "拖动已选模型左侧的手柄调整菜单顺序，或使用上方的排序方式。只有一个模型时无需排序，直接继续。"
+      },
+      "default-model": {
+        "title": "设置默认模型",
+        "body": "点击某个模型的「设为默认模型」。默认模型决定默认使用谁，排序只决定菜单顺序；已有默认标记时也可以保留。"
+      },
+      "save-routing": {
+        "title": "保存聚合配置",
+        "body": "点击底部「保存配置」。若没有改动且已保存，可以直接继续。保存草稿不等于启用聚合路由。"
+      },
+      "enable-config": {
+        "title": "启用聚合路由",
+        "body": "打开卡片右侧开关，阅读并确认配置接管提示。这会改变 Codex 使用的配置，由你主动确认执行。"
+      },
+      "enable-proxy": {
+        "title": "检查本地中转路由",
+        "body": "启用聚合路由会启动本地中转。状态已开启时直接继续，不需要重复切换；如果未运行，请检查开关或返回聚合路由重新启用。"
+      },
+      "repair-sessions": {
+        "title": "按需修复旧会话",
+        "body": "旧会话不可见时，点击「修复会话可见性」查看检查结果，再按提示确认。没有此问题可跳过；引导不会自动修复或迁移会话。"
+      },
+      "restart": {
+        "title": "重启 Codex 加载配置",
+        "body": "准备好后点击「重启 Codex」，确认后执行。若正在工作可以暂时跳过；引导不会因点击下一步而重启应用。"
+      }
+    },
+    "welcomeTitle": "配置你的 Codex",
+    "welcomeBody": "默认推荐完整的聚合中转流程：从添加供应商、模型映射，到选择模型、排序和启用。每一步由你确认，不会自动保存、启用或重启。",
+    "providerDescription": "使用一家供应商的模型，完成添加和启用即可。",
+    "routingDescription": "同时使用多个供应商 + 官方订阅，汇总到同一份模型菜单。配置生效后，在 Codex 内切换模型和来源，无需每次重启。",
+    "providerSource": "从哪里开始？",
+    "createProvider": "添加新的供应商",
+    "resume": "继续上次引导",
+    "start": "开始引导",
+    "previous": "上一步",
+    "exit": "退出引导",
+    "minimize": "收起",
+    "expand": "展开",
+    "officialHint": "当前是官方或托管登录供应商：通过账号区域完成授权，不需要手填 API Key 或接口地址；没有模型映射区域时可直接继续。",
+    "ready": "可继续下一步",
+    "waiting": "完成此操作后继续",
+    "targetMissing": "暂未找到对应控件。可以重新定位，或退出引导后继续操作。",
+    "locate": "重新定位",
+    "noModels": "如果这里没有模型，请先为供应商添加模型映射；官方订阅可选，不使用它就不需要登录。",
+    "backToModels": "返回选择模型",
+    "providerSaved": "供应商已保存，继续",
+    "discardBack": "返回上一页会关闭当前详情页，未保存的输入将丢失。退出引导则会保留当前页面。",
+    "keepEditing": "继续编辑",
+    "discardAndBack": "放弃并返回",
+    "manualModels": "手动填写",
+    "skipStep": "暂时跳过",
+    "viewResult": "查看结果",
+    "summaryTitle": "引导结束",
+    "configured": "已确认启用状态。若本次尚未重启，可稍后在主页面手动重启 Codex。",
+    "notConfigured": "你已浏览完引导，但尚未确认配置已启用。跳过的操作不会被记为配置成功，可随时重新打开引导。",
+    "fetch": {
+      "idle": "填写密钥和地址后，点击高亮的「获取模型列表」。",
+      "loading": "正在获取模型列表…",
+      "success": "获取完成，返回的模型数量",
+      "error": "获取失败，请检查表单中的密钥、地址和错误提示后重试，也可以手动填写模型。"
+    }
   }
 }

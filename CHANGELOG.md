@@ -5,6 +5,24 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.20.9] - 2026-09-28
+
+### Added
+- Interactive Codex setup guidance with a recommended full aggregate-routing workflow, a provider-only workflow, replay, and resumable progress without storing credentials.
+- Step-by-step guidance inside provider and routing detail pages, covering API credentials, model discovery and mapping, selection, ordering, activation, session repair, and restart.
+- An Add provider entry in the routing model list.
+
+### Changed
+- Compact translucent guidance stays at the bottom during normal steps and animates above the actual Add / Save routing configuration buttons at save steps. Reduced-motion preferences are respected.
+- Clearer model-selection affordances and routing descriptions explain using multiple providers and optional official subscriptions together, with no restart needed when switching configured models.
+- High-contrast target outlines now cover the entire model-mapping section, follow row additions/removals, and leave space around inputs.
+- Includes upstream main changes merged into the community routing branch since v3.20.8.
+
+### Fixed
+- Guide navigation now follows real page-opening actions without automatically skipping form steps or saving configuration.
+- New custom Codex provider templates no longer fail editor preview because of an empty API key.
+- Unsaved form data is preserved when exiting guidance, and navigation that discards drafts requires confirmation.
+
 ## [3.20.4] - 2026-09-22
 
 Development since v3.20.3 adds a tenth managed app and a wave of contributed correctness fixes, most of them for Codex through the local proxy. MiniMax Code joins as an additive-mode app (#7383): providers are written into its native `~/.minimax/config.yaml` alongside MiniMax Code's own settings, with bidirectional MCP sync, Skills, an `AGENTS.md` prompt library, a read-only session browser with resume, and session usage in the dashboard, while model selection, login and session deletion stay with MiniMax Code. Claude Desktop 3P configuration now works on Linux, Flatpak builds included (#7331). On the proxy, Codex 0.154+ requests carrying an `additional_tools` item no longer 400 on strict Chat gateways, where the converter had turned it into a `content: null` system message (#7454), a single `detail: "original"` screenshot no longer breaks a Codex session for good (#7476), tools without a description are no longer sent as `null` (#7319, #7378), Claude Code's auto mode classifier works through GitHub Copilot (#5404), models mapped to Grok 4.6 get their reasoning effort again and `/effort xhigh` is no longer dropped (#7318), and `/effort max` stays `max` on GPT-5.6 and GPT-6 Astra instead of being lowered to `xhigh` (#7531). Two Codex account bugs are closed: editing or switching away from a Codex provider that authenticates through its own provider table no longer silently erases its stored API key (#7434), and cards still bound to a ChatGPT account removed from the Auth Center can be rebound or switched away instead of failing every switch, takeover toggle and startup restore (#7395). The request log shows output tokens per second (#3369), the OpenCode provider form can search and bulk-add fetched models (#7515), skills.sh skills whose id differs from their directory and repositories with more than 10,000 files now install (#6381, #7489), the enabled prompt picks up external edits to `CLAUDE.md`/`AGENTS.md` (#7194), OMO with a WSL-hosted OpenCode directory edits the unified config it actually reads (#7550), the About card's tool probes stop hanging on npm metadata and misreading the WSL MOTD as a version (#7346, #7348), and the Windows main window no longer drops out of the taskbar after a silent start (#6348). On the preset side, the domestic Codex presets are refreshed from a Responses API audit (Kimi For Coding on K2.8 Preview with a 1M window, DeepSeek defaulting to `deepseek-flash`), MiniMax CN and BaiLing move to their current official endpoints, AICodeWith's Codex-family endpoint is corrected to `/v1`, Claude Desktop offers the 1M variant on DeepSeek V4 routes, and a handful of presets are added (Kimi Global, FluxA Token Plan, Soshow and four Codex Responses presets). DeepSeek V4 Pro pricing returns to its peak list price after DeepSeek withdrew the V4.1 Flash cutover that v3.20.3 had priced in early, and five previously unpriced models get pricing rows. This release changes the database schema: `SCHEMA_VERSION` 18 → 19 adds an `enabled_mcode` flag to `mcp_servers` and `skills`.

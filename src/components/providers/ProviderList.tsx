@@ -452,7 +452,7 @@ export function ProviderList({
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-3">
-          {filteredProviders.map((provider) => {
+          {filteredProviders.map((provider, index) => {
             const isOmo = provider.category === "omo";
             const isOmoSlim = provider.category === "omo-slim";
             const isOmoCurrent = isOmo && provider.id === (currentOmoId || "");
@@ -473,6 +473,11 @@ export function ProviderList({
             return (
               <SortableProviderCard
                 key={provider.id}
+                dataTour={
+                  appId === "codex" && index === 0
+                    ? "codex-provider-card"
+                    : undefined
+                }
                 provider={provider}
                 isCurrent={isCurrent}
                 appId={appId}
@@ -669,6 +674,7 @@ interface SortableProviderCardProps {
   isCodexModelRoutingActive: boolean;
   codexRoutingModelCount: number;
   isDirectProvider: boolean;
+  dataTour?: string;
   isAutoFailoverEnabled: boolean;
   failoverPriority?: number;
   isInFailoverQueue: boolean;
@@ -705,6 +711,7 @@ function SortableProviderCard({
   isCodexModelRoutingActive,
   codexRoutingModelCount,
   isDirectProvider,
+  dataTour,
   isAutoFailoverEnabled,
   failoverPriority,
   isInFailoverQueue,
@@ -757,6 +764,7 @@ function SortableProviderCard({
         isCodexModelRoutingActive={isCodexModelRoutingActive}
         codexRoutingModelCount={codexRoutingModelCount}
         isDirectProvider={isDirectProvider}
+        dataTour={dataTour}
         dragHandleProps={{
           attributes,
           listeners,

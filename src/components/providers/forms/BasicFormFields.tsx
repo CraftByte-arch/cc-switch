@@ -132,7 +132,7 @@ export function BasicFormFields({
           control={form.control}
           name="name"
           render={({ field }) => (
-            <FormItem>
+            <FormItem data-tour="codex-provider-name">
               <FormLabel>{t("provider.name")}</FormLabel>
               <FormControl>
                 <ImeSafeInput

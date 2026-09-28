@@ -3351,6 +3351,7 @@
     "prefixSummary": "Prefix: {{prefix}}",
     "prefixOff": "No prefix",
     "cardTitle": "Codex aggregated model routing",
+    "cardIntro": "Use multiple providers and an official subscription together. Once configured, switch models and sources inside Codex without restarting each time.",
     "routeNameSummary": "Route name: {{name}} · {{count}} models",
     "enabledToast": "Model routing is on. Reopen Codex after the first takeover so it loads the unified catalog.",
     "disabledToast": "Model routing is off. Codex configuration has been restored.",
@@ -3388,7 +3389,9 @@
       "modelAdded": "Added {{model}}",
       "modelRemoved": "Removed {{model}}",
       "nameRequired": "Enter a Provider display name before saving.",
-      "activeNeedsModel": "Routing is running. Keep at least one model."
+      "activeNeedsModel": "Routing is running. Keep at least one model.",
+      "pickToEnable": "Select at least one model and save, then turn routing on from the list.",
+      "clickToAdd": "Click a model card to add it. The first one becomes the default; change it later in Model order."
     },
     "subscription": {
       "enable": "Enable official subscription",
@@ -3409,7 +3412,10 @@
     "expiredOfficialMessage": "Official models are still selected, and the login is no longer valid, so this cannot be saved directly. Sign in again and then save, or remove those official models and turn the subscription off.",
     "expiredOfficialLogin": "Sign in again",
     "expiredOfficialRemove": "Remove official models and turn subscription off",
-    "providerNameHint": "The aggregated router name shown in the Codex model menu. The internal provider ID stays custom."
+    "providerNameHint": "The aggregated router name shown in the Codex model menu. The internal provider ID stays custom.",
+    "selectedEmpty": "Model order",
+    "pickModelsFirst": "No models selected yet. Use the switch or Manage models to choose some.",
+    "pickModelsFirstHint": "Select a model first"
   },
   "codexMaintenance": {
     "actions": "Codex maintenance",
@@ -3489,5 +3495,134 @@
       "restart": "Restart Codex"
     },
     "progressRepairing": "Repairing session data…"
+  },
+  "codexGuide": {
+    "saveProviderHint": "Click the highlighted Add button below to save the provider. The guide returns to the bottom after success.",
+    "saveRoutingHint": "Click the highlighted Save routing configuration button below. The guide returns to the bottom after success.",
+    "guideLabel": "Setup guide",
+    "targetHint": "Current action: use the controls in the orange outline",
+    "setupNote": "On first activation or after connection changes, follow the prompts to repair sessions and restart Codex. Switching configured models afterward needs no restart. An official subscription is optional; no official sign-in is needed if you do not use it.",
+    "recommended": "Recommended · Full setup",
+    "replay": "Guide",
+    "providerOnly": "Provider only",
+    "routing": "Aggregate model routing",
+    "close": "Close guide",
+    "skip": "Skip",
+    "next": "Next",
+    "done": "Done",
+    "progress": "{{current}} / {{total}}",
+    "steps": {
+      "add-provider": {
+        "title": "Add a provider",
+        "body": "Use the plus button or Next to open the new-provider page. This does not save any configuration."
+      },
+      "provider-preset": {
+        "title": "Choose a preset",
+        "body": "Select your provider, or choose Custom configuration if it is not listed. Continue to the name field when ready."
+      },
+      "provider-name": {
+        "title": "Name the provider",
+        "body": "Use a recognizable name, such as My relay. You can keep the name supplied by a preset."
+      },
+      "api-key": {
+        "title": "Enter the API key",
+        "body": "Paste the key supplied by your provider, not your account password. The key stays masked and is never recorded by the guide."
+      },
+      "api-url": {
+        "title": "Enter the API endpoint",
+        "body": "Use the API endpoint from your provider, not its website homepage. Check an endpoint supplied by a preset before continuing."
+      },
+      "fetch-models": {
+        "title": "Fetch available models",
+        "body": "Use Fetch models to request the supported list. Retry on failure, or choose Enter manually if this provider does not support discovery."
+      },
+      "model-mapping": {
+        "title": "Add model mappings",
+        "body": "Use Add model. The display name labels the Codex menu; the request model must be a provider-supported model ID. You can also choose from the fetched list."
+      },
+      "save-provider": {
+        "title": "Save the provider",
+        "body": "Review the form and use Add at the bottom. Continue only after saving succeeds. Fix any validation errors; Next never saves for you."
+      },
+      "enable-provider": {
+        "title": "Enable this provider",
+        "body": "Use Enable on the selected provider card. If it is already current, continue. Review any confirmation yourself."
+      },
+      "enter-routing": {
+        "title": "Discover model routing",
+        "body": "Use multiple providers and an official subscription together without enabling a single provider first. Once configured, switch models and sources inside Codex without restarting. Use Manage models or Next to open details."
+      },
+      "routing-sources": {
+        "title": "Understand model sources",
+        "body": "Available models is grouped by provider. The official subscription is optional: turn it off for relay-only use without official login."
+      },
+      "select-models": {
+        "title": "Select models",
+        "body": "Use a model selection button; its circle becomes a check. Select at least one and review the count. The guide never selects models for you."
+      },
+      "sort-models": {
+        "title": "Order the models",
+        "body": "Drag a selected model by its handle or choose a sort mode. With just one model, continue without reordering."
+      },
+      "default-model": {
+        "title": "Choose the default model",
+        "body": "Use Set as default model. The default determines which model is used by default; ordering only changes the menu. You can keep the current default."
+      },
+      "save-routing": {
+        "title": "Save routing configuration",
+        "body": "Use Save configuration at the bottom. If there are no changes and it is already saved, continue. Saving a draft does not enable routing."
+      },
+      "enable-config": {
+        "title": "Enable model routing",
+        "body": "Turn on the card switch, review and confirm configuration takeover. Only your explicit confirmation applies this change."
+      },
+      "enable-proxy": {
+        "title": "Check local routing",
+        "body": "Enabling model routing starts local routing. If already on, continue without toggling it. Otherwise check the switch or re-enable model routing."
+      },
+      "repair-sessions": {
+        "title": "Repair old sessions if needed",
+        "body": "If older sessions are missing, use Repair session visibility and review the checks before confirming. Skip if unnecessary; the guide never repairs or migrates sessions automatically."
+      },
+      "restart": {
+        "title": "Restart Codex when ready",
+        "body": "Use Restart Codex and confirm to load the configuration. Skip for now if you are working. Next never restarts the app."
+      }
+    },
+    "welcomeTitle": "Set up Codex",
+    "welcomeBody": "Start with the recommended full routing setup: add a provider, map models, select and sort models, then enable routing. You confirm every step; nothing is saved, enabled or restarted automatically.",
+    "providerDescription": "Add and enable one provider to use its models.",
+    "routingDescription": "Use multiple providers + an official subscription together in one model menu. Once configured, switch models and sources inside Codex without restarting each time.",
+    "providerSource": "Where would you like to start?",
+    "createProvider": "Add a new provider",
+    "resume": "Resume guide",
+    "start": "Start guide",
+    "previous": "Back",
+    "exit": "Exit guide",
+    "minimize": "Minimize",
+    "expand": "Expand",
+    "officialHint": "This provider uses official or managed account authorization, not a manually entered API key or URL. Continue when model mapping does not apply.",
+    "ready": "Ready to continue",
+    "waiting": "Complete this action to continue",
+    "targetMissing": "This control is not available yet. Locate it again or exit the guide to continue working.",
+    "locate": "Locate again",
+    "noModels": "If no models appear, add model mappings to a provider first. The official subscription is optional; relay-only use does not require login.",
+    "backToModels": "Back to model selection",
+    "providerSaved": "Provider saved — continue",
+    "discardBack": "Going back closes this detail page and discards unsaved input. Exiting the guide instead keeps the page open.",
+    "keepEditing": "Keep editing",
+    "discardAndBack": "Discard and go back",
+    "manualModels": "Enter manually",
+    "skipStep": "Skip for now",
+    "viewResult": "View result",
+    "summaryTitle": "Guide finished",
+    "configured": "The enabled state is confirmed. If you have not restarted Codex, you can do so later from the main page.",
+    "notConfigured": "You have reached the end of the guide, but configuration is not confirmed as enabled. Skipped actions are not counted as successful setup. You can replay the guide anytime.",
+    "fetch": {
+      "idle": "Enter the key and endpoint, then use Fetch models.",
+      "loading": "Fetching models…",
+      "success": "Fetch complete. Models returned",
+      "error": "Fetch failed. Check the key, endpoint and error message before retrying, or enter model IDs manually."
+    }
   }
 }

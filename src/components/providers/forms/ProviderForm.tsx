@@ -1,5 +1,6 @@
 import { normalizeCodexCatalogModelsForSave } from "@/utils/codexCatalog";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { updateCodexGuideSignals } from "@/lib/codexGuide";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
@@ -2025,6 +2026,12 @@ function ProviderFormFull({
     });
   };
 
+  const guideName = form.watch("name");
+  useEffect(() => {
+    if (appId === "codex")
+      updateCodexGuideSignals({ nameReady: Boolean(guideName?.trim()) });
+  }, [appId, guideName]);
+
   const settingsConfigErrorField = (
     <FormField
       control={form.control}
@@ -2046,15 +2053,21 @@ function ProviderFormFull({
           className="space-y-6 glass rounded-xl p-6 border border-white/10"
         >
           {!initialData && (
-            <ProviderPresetSelector
-              selectedPresetId={selectedPresetId}
-              presetEntries={presetEntries}
-              presetCategoryLabels={presetCategoryLabels}
-              onPresetChange={handlePresetChange}
-              onUniversalPresetSelect={onUniversalPresetSelect}
-              onManageUniversalProviders={onManageUniversalProviders}
-              category={category}
-            />
+            <div
+              data-tour={
+                appId === "codex" ? "codex-provider-preset" : undefined
+              }
+            >
+              <ProviderPresetSelector
+                selectedPresetId={selectedPresetId}
+                presetEntries={presetEntries}
+                presetCategoryLabels={presetCategoryLabels}
+                onPresetChange={handlePresetChange}
+                onUniversalPresetSelect={onUniversalPresetSelect}
+                onManageUniversalProviders={onManageUniversalProviders}
+                category={category}
+              />
+            </div>
           )}
 
           <BasicFormFields

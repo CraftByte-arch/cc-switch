@@ -28,6 +28,8 @@ interface FullScreenPanelProps {
   contentClassName?: string;
   /** Let a workspace own its pane scrolling without an outer page scrollbar. */
   scrollMode?: "page" | "contained";
+  /** Extra classes for the full-screen shell, for example a higher z-index. */
+  className?: string;
 }
 
 const DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px - match App.tsx
@@ -66,6 +68,7 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
   contentClassName,
   scrollMode = "page",
   motionPreset = "fade",
+  className,
 }) => {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
@@ -130,7 +133,8 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
               ? { duration: 0.26, ease: [0.22, 1, 0.36, 1] }
               : { duration: prefersReducedMotion ? 0 : 0.2 }
           }
-          className="fixed inset-0 z-[60] flex flex-col"
+          className={cn("fixed inset-0 z-[60] flex flex-col", className)}
+          data-codex-guide-panel
           style={{ backgroundColor: "hsl(var(--background))" }}
         >
           {/* Drag region - match App.tsx. Linux 上 DRAG_BAR_HEIGHT=0，

@@ -13,6 +13,8 @@ export interface CodexTemplate {
  * @returns Codex 模板配置
  */
 export function getCodexCustomTemplate(): CodexTemplate {
+  // 新建时还没有 Key。不要写 requires_openai_auth = true，否则编辑器会把空 Key
+  // 当成「回退到 auth.json 登录」拒绝预览。保存时由写入逻辑按登录状态补这个开关。
   const config = `model_provider = "custom"
 model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
@@ -20,8 +22,7 @@ disable_response_storage = true
 
 [model_providers.custom]
 name = "custom"
-wire_api = "responses"
-requires_openai_auth = true`;
+wire_api = "responses"`;
 
   return {
     auth: { OPENAI_API_KEY: "" },

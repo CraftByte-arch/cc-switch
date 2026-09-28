@@ -1,3 +1,4 @@
+import { updateCodexGuideSignals } from "@/lib/codexGuide";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { CodexGuideReplay } from "@/components/codex/CodexGuide";
 import {
   Dialog,
   DialogContent,
@@ -50,7 +52,9 @@ export function CodexMaintenanceActions() {
       className="flex flex-wrap items-center justify-end gap-2 pt-3"
       role="group"
       aria-label={t("codexMaintenance.actions")}
+      data-tour="codex-maintenance"
     >
+      <CodexGuideReplay />
       <Button
         variant="ghost"
         size="sm"
@@ -62,6 +66,7 @@ export function CodexMaintenanceActions() {
       <Button
         variant="outline"
         size="sm"
+        data-tour="codex-repair"
         onClick={() => requestCodexMaintenance("repair")}
       >
         <Wrench className="h-4 w-4 shrink-0" />
@@ -70,6 +75,7 @@ export function CodexMaintenanceActions() {
       <Button
         variant="outline"
         size="sm"
+        data-tour="codex-restart"
         onClick={() => requestCodexMaintenance("restart")}
       >
         <RotateCw className="h-4 w-4 shrink-0" />
@@ -213,6 +219,10 @@ export function CodexMaintenanceDialog() {
                 runId,
               );
         setResult(completed);
+        updateCodexGuideSignals({
+          restarted: completed.restarted,
+          ...(completed.repair ? { repaired: true } : {}),
+        });
         void client.invalidateQueries({ queryKey: ["sessions"] });
         if (!completed.repair) {
           toast.success(t("codexMaintenance.restarted"));

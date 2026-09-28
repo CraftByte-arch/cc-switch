@@ -11,6 +11,12 @@ import {
 import { CodexNativeRoutingHeader } from "./CodexNativeRoutingHeader";
 import { CodexNativeLoginButton } from "./CodexNativeLoginButton";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CODEX_GUIDE_EVENT,
+  getCodexGuideDetail,
+  updateCodexGuideSignals,
+  type CodexGuideDetail,
+} from "@/lib/codexGuide";
 import { useTranslation } from "react-i18next";
 import {
   DndContext,
@@ -32,6 +38,7 @@ import {
   AlertTriangle,
   GripVertical,
   Loader2,
+  Check,
   Pencil,
   ExternalLink,
   Plus,
@@ -212,6 +219,7 @@ function SelectedModel({
       className="routing-selected-row"
       data-conflict={conflict || !model}
       data-default={isDefault}
+      data-tour={index === 0 ? "codex-routing-default" : undefined}
     >
       <button
         type="button"
@@ -301,6 +309,9 @@ export function CodexModelRoutingDialog({
   active,
   onEditProvider,
   detailEditorOpen = false,
+  promptToEnable = false,
+  onAddProvider,
+  addProviderOpen = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -308,6 +319,10 @@ export function CodexModelRoutingDialog({
   active: boolean;
   onEditProvider: (provider: Provider) => void;
   detailEditorOpen?: boolean;
+  /** Opened from the off switch while no model is saved yet. */
+  promptToEnable?: boolean;
+  onAddProvider?: () => void;
+  addProviderOpen?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const query = useCodexModelRouting();
@@ -334,11 +349,22 @@ export function CodexModelRoutingDialog({
   const [activePane, setActivePane] = useState<"available" | "selected">(
     "available",
   );
+  useEffect(() => {
+    const onPlace = (event: Event) => {
+      const place = (event as CustomEvent<CodexGuideDetail>).detail.place;
+      if (place === "routing-available") setActivePane("available");
+      if (place === "routing-selected") setActivePane("selected");
+    };
+    window.addEventListener(CODEX_GUIDE_EVENT, onPlace);
+    return () => window.removeEventListener(CODEX_GUIDE_EVENT, onPlace);
+  }, []);
   const [nativePrefixExpanded, setNativePrefixExpanded] = useState(false);
   const [selectionNotice, setSelectionNotice] = useState("");
   const [providerEditor, setProviderEditor] =
     useState<RoutingProviderEditorTarget>();
   const lastSavedRouting = useRef("");
+  const routingModelTour = useRef(false);
+  routingModelTour.current = false;
   const previousProviders = useRef(providers);
   const persisting = useRef(false);
   const editProvider = useEditCodexRoutingProvider(undefined, {
@@ -378,7 +404,11 @@ export function CodexModelRoutingDialog({
       setBaseline(structuredClone(initial));
       setSortMode("manual");
       setSearch("");
-      setActivePane("available");
+      setActivePane(
+        getCodexGuideDetail().place === "routing-selected"
+          ? "selected"
+          : "available",
+      );
       setNativePrefixExpanded(false);
       setSelectionNotice("");
       setError("");
@@ -906,6 +936,23 @@ export function CodexModelRoutingDialog({
             : active && !draft.models.length
               ? t("codexRouting.layout.activeNeedsModel")
               : "";
+  useEffect(() => {
+    updateCodexGuideSignals({ routingOpen: open });
+    if (open && initialized)
+      updateCodexGuideSignals({
+        selectedCount: draft.models.length,
+        defaultReady: Boolean(draft.defaultModel),
+        routingSaved: !dirty && !pending,
+      });
+  }, [
+    open,
+    initialized,
+    draft.models.length,
+    draft.defaultModel,
+    dirty,
+    pending,
+  ]);
+
   const saveDisabled =
     !dirty || !initialized || pending || Boolean(saveBlockReason);
 
@@ -915,7 +962,7 @@ export function CodexModelRoutingDialog({
         isOpen={open}
         title={t("codexRouting.title")}
         onClose={() => {
-          if (!providerEditor && !detailEditorOpen) close();
+          if (!providerEditor && !detailEditorOpen && !addProviderOpen) close();
         }}
         scrollMode="contained"
         contentClassName="h-full min-h-0 space-y-0 px-4 py-2 sm:px-6"
@@ -956,6 +1003,7 @@ export function CodexModelRoutingDialog({
               {t("common.close")}
             </Button>
             <Button
+              data-tour="codex-routing-save"
               onClick={() => {
                 const officialBlocked =
                   draft.models.some(
@@ -1018,6 +1066,7 @@ export function CodexModelRoutingDialog({
                 type="button"
                 role="tab"
                 id="routing-available-tab"
+                data-tour="codex-routing-available-tab"
                 data-pane="available"
                 aria-controls="routing-available-pane"
                 aria-selected={activePane === "available"}
@@ -1036,7 +1085,11 @@ export function CodexModelRoutingDialog({
                 tabIndex={activePane === "selected" ? 0 : -1}
                 onClick={() => setActivePane("selected")}
               >
-                {t("codexRouting.selected", { count: draft.models.length })}
+                {draft.models.length === 0
+                  ? t("codexRouting.selectedEmpty", {
+                      defaultValue: "模型排序",
+                    })
+                  : t("codexRouting.selected", { count: draft.models.length })}
               </button>
             </div>
             <div className="routing-toolbar-main">
@@ -1058,6 +1111,7 @@ export function CodexModelRoutingDialog({
               </div>
               <div
                 className="routing-toolbar-sort"
+                data-tour="codex-routing-sort"
                 hidden={activePane !== "selected"}
               >
                 <SortModeSwitch
@@ -1210,7 +1264,28 @@ export function CodexModelRoutingDialog({
                 tabIndex={0}
                 aria-label={t("codexRouting.available")}
               >
-                <div className="routing-provider-list">
+                <div
+                  className="routing-provider-list"
+                  data-tour="codex-routing-models"
+                >
+                  {draft.models.length === 0 && (
+                    <div className="routing-pick-hint">
+                      {promptToEnable && (
+                        <p>
+                          {t("codexRouting.layout.pickToEnable", {
+                            defaultValue:
+                              "点选至少 1 个模型，保存后回到列表即可开启。",
+                          })}
+                        </p>
+                      )}
+                      <p>
+                        {t("codexRouting.layout.clickToAdd", {
+                          defaultValue:
+                            "点击模型卡片即可加入路由。第一个选中的会作为默认，之后可在模型排序里调整。",
+                        })}
+                      </p>
+                    </div>
+                  )}
                   {visibleGroups.map(({ provider, visible }) => (
                     <section
                       key={provider.id}
@@ -1381,6 +1456,12 @@ export function CodexModelRoutingDialog({
                             <div
                               key={selectionKey}
                               className="routing-model-option"
+                              data-tour={
+                                routingModelTour.current
+                                  ? undefined
+                                  : ((routingModelTour.current = true),
+                                    "codex-routing-model")
+                              }
                             >
                               <div
                                 className="routing-candidate"
@@ -1404,6 +1485,12 @@ export function CodexModelRoutingDialog({
                                       : undefined
                                   }
                                 >
+                                  <span
+                                    className="routing-select-mark"
+                                    aria-hidden="true"
+                                  >
+                                    {selected && <Check strokeWidth={3} />}
+                                  </span>
                                   <span className="routing-model-copy">
                                     <span className="routing-model-name">
                                       {modelLabel}
@@ -1502,6 +1589,15 @@ export function CodexModelRoutingDialog({
                       </div>
                     </section>
                   ))}
+                  <button
+                    type="button"
+                    className="routing-add-provider"
+                    disabled={pending || !initialized}
+                    onClick={() => onAddProvider?.()}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    {t("provider.addProvider")}
+                  </button>
                 </div>
                 {!visibleGroups.some((group) => group.visible.length > 0) && (
                   <p className="py-8 text-center text-sm text-muted-foreground">
@@ -1526,11 +1622,20 @@ export function CodexModelRoutingDialog({
               <div
                 className="routing-pane-scroll scroll-overlay"
                 tabIndex={0}
-                aria-label={t("codexRouting.selected", {
-                  count: draft.models.length,
-                })}
+                aria-label={
+                  draft.models.length === 0
+                    ? t("codexRouting.selectedEmpty", {
+                        defaultValue: "模型排序",
+                      })
+                    : t("codexRouting.selected", {
+                        count: draft.models.length,
+                      })
+                }
               >
-                <div className="routing-selected-canvas">
+                <div
+                  className="routing-selected-canvas"
+                  data-tour="codex-routing-order"
+                >
                   <p className="routing-sort-hint">
                     {t(
                       sortMode === "manual"

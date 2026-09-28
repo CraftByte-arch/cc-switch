@@ -15,6 +15,11 @@ import type { OpenClawProviderConfig, Provider } from "@/types";
 import type { AppId } from "@/lib/api";
 import { authApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useSyncExternalStore } from "react";
+import {
+  getCodexGuideDetail,
+  subscribeCodexGuideDetail,
+} from "@/lib/codexGuide";
 import { ProviderActions } from "@/components/providers/ProviderActions";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import UsageFooter from "@/components/UsageFooter";
@@ -72,6 +77,7 @@ interface ProviderCardProps {
   isCodexModelRoutingActive?: boolean;
   codexRoutingModelCount?: number;
   isDirectProvider?: boolean; // 路由模式下的直连供应商：退出路由时写回它
+  dataTour?: string;
   dragHandleProps?: DragHandleProps;
   isAutoFailoverEnabled?: boolean; // 是否开启自动故障转移
   failoverPriority?: number; // 故障转移优先级（1 = P1, 2 = P2, ...）
@@ -192,6 +198,7 @@ export function ProviderCard({
   isCodexModelRoutingActive = false,
   codexRoutingModelCount = 0,
   isDirectProvider = false,
+  dataTour,
   dragHandleProps,
   isAutoFailoverEnabled = false,
   failoverPriority,
@@ -319,6 +326,14 @@ export function ProviderCard({
     appId === "codex" && providerNeedsRouting(appId, provider);
   // 获取用量数据以判断是否有多套餐
   // 累加模式应用：使用 isInConfig 代替 isCurrent
+  const guide = useSyncExternalStore(
+    subscribeCodexGuideDetail,
+    getCodexGuideDetail,
+  );
+  const guideEnabling =
+    appId === "codex" &&
+    guide.stepId === "enable-provider" &&
+    (!guide.providerId || guide.providerId === provider.id);
   const shouldAutoQuery = isAdditiveAppId(appId) ? isInConfig : isCurrent;
   const autoQueryInterval = shouldAutoQuery
     ? provider.meta?.usage_script?.autoQueryInterval || 0
@@ -385,6 +400,8 @@ export function ProviderCard({
 
   return (
     <div
+      data-tour={appId === "codex" ? "codex-provider-card" : dataTour}
+      data-provider-id={provider.id}
       className={cn(
         "relative overflow-hidden rounded-xl border border-border p-4 transition-all duration-300",
         "bg-card text-card-foreground group",
@@ -719,7 +736,14 @@ export function ProviderCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100 group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity duration-200">
+          <div
+            className={cn(
+              "flex items-center gap-1.5 flex-shrink-0 transition-opacity duration-200",
+              guideEnabling
+                ? "opacity-100 pointer-events-auto"
+                : "opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100 group-hover:pointer-events-auto group-focus-within:pointer-events-auto",
+            )}
+          >
             <ProviderActions
               appId={appId}
               isCurrent={isCurrent}

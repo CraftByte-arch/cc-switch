@@ -381,6 +381,48 @@
   box-shadow: 0 0 0 1px hsl(var(--primary) / 0.1);
 }
 
+.codex-routing-layout .routing-select-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border: 1.5px solid
+    color-mix(in srgb, hsl(var(--foreground)) 28%, hsl(var(--border)));
+  border-radius: 999px;
+  background: transparent;
+  color: hsl(var(--primary-foreground));
+}
+
+.codex-routing-layout .routing-select-mark svg {
+  width: 10px;
+  height: 10px;
+}
+
+.codex-routing-layout .routing-candidate:hover .routing-select-mark {
+  border-color: hsl(var(--primary) / 0.7);
+}
+
+.codex-routing-layout
+  .routing-candidate[data-selected="true"]
+  .routing-select-mark {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+}
+
+.codex-routing-layout .routing-pick-hint {
+  margin: 0 2px 10px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.codex-routing-layout .routing-pick-hint p + p {
+  margin-top: 2px;
+}
+
 .codex-routing-layout .routing-no-catalog {
   padding: 8px 12px;
   text-align: center;
@@ -390,8 +432,8 @@
 
 .codex-routing-layout .routing-model-select {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 8px;
   flex: 1;
   min-width: 0;
   text-align: left;
@@ -493,6 +535,39 @@
 }
 
 .codex-routing-layout .routing-add-model:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.codex-routing-layout .routing-add-provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 2px;
+  padding: 8px 12px;
+  border: 1px dashed
+    color-mix(in srgb, hsl(var(--foreground)) 18%, hsl(var(--border)));
+  border-radius: 14px;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+
+.codex-routing-layout .routing-add-provider:hover:not(:disabled) {
+  border-color: hsl(var(--primary) / 0.45);
+  color: hsl(var(--foreground));
+  background: hsl(var(--primary) / 0.04);
+}
+
+.codex-routing-layout .routing-add-provider:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.codex-routing-layout .routing-add-provider:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }

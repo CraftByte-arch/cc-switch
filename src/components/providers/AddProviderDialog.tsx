@@ -1,3 +1,4 @@
+import { updateCodexGuideSignals } from "@/lib/codexGuide";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Plus } from "lucide-react";
@@ -127,6 +128,15 @@ export function AddProviderDialog({
       cancelled = true;
     };
   }, [open, appId, t]);
+
+  useEffect(() => {
+    if (appId === "codex") {
+      updateCodexGuideSignals({
+        providerOpen: open,
+        ...(open ? { providerSaved: false, savedProviderId: "" } : {}),
+      });
+    }
+  }, [appId, open]);
 
   const closeDialog = useCallback(() => {
     setAuthSettingsTarget(null);
@@ -422,6 +432,7 @@ export function AddProviderDialog({
           ...providerData,
           ...(editorBase ? { editorSave: { ...editorBase, onConflict } } : {}),
         });
+        if (appId === "codex") updateCodexGuideSignals({ providerSaved: true });
         closeDialog();
       };
       await submitWithConflictRetry(submit);
@@ -454,6 +465,7 @@ export function AddProviderDialog({
         </Button>
         <Button
           type="submit"
+          data-tour={appId === "codex" ? "codex-save-provider" : undefined}
           form="provider-form"
           disabled={isFormSubmitting || !isFormReady}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
@@ -490,6 +502,7 @@ export function AddProviderDialog({
       isOpen={open}
       title={t("provider.addNewProvider")}
       onClose={handlePanelClose}
+      className="z-[80]"
       footer={footer}
       contentClassName={appId === "pi" ? "pt-3 pb-0" : "pt-3"}
     >

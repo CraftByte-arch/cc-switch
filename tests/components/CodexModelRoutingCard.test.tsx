@@ -44,6 +44,7 @@ describe("routing card naming", () => {
       expect(
         screen.getByRole("heading", { name: "Codex 聚合模型路由" }),
       ).toBeInTheDocument();
+      expect(screen.getByText(zh.codexRouting.cardIntro)).toBeInTheDocument();
       expect(
         screen.getByText("聚合路由名称：My Router · 1 个模型"),
       ).toBeInTheDocument();

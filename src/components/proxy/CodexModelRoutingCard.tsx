@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  CODEX_GUIDE_EVENT,
+  updateCodexGuideSignals,
+  type CodexGuideDetail,
+} from "@/lib/codexGuide";
 import { useTranslation } from "react-i18next";
 import { Network, Settings2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,10 +23,14 @@ export function CodexModelRoutingCard({
   providers,
   onEditProvider,
   detailEditorOpen = false,
+  onAddProvider,
+  addProviderOpen = false,
 }: {
   providers: Record<string, Provider>;
   onEditProvider: (provider: Provider) => void;
   detailEditorOpen?: boolean;
+  onAddProvider?: () => void;
+  addProviderOpen?: boolean;
 }) {
   const { t } = useTranslation();
   const query = useCodexModelRouting();
@@ -29,10 +38,32 @@ export function CodexModelRoutingCard({
   const { data: takeover } = useProxyTakeoverStatus();
   const { data: status } = useProxyStatusQuery();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const onPlace = (event: Event) => {
+      const detail = (event as CustomEvent<CodexGuideDetail>).detail;
+      if (!detail.stepId) return;
+      const place = detail.place;
+      const showRouting =
+        place === "routing-available" || place === "routing-selected";
+      if (showRouting) setOpenedToEnable(false);
+      setOpen(showRouting);
+    };
+    window.addEventListener(CODEX_GUIDE_EVENT, onPlace);
+    return () => window.removeEventListener(CODEX_GUIDE_EVENT, onPlace);
+  }, []);
+  const [openedToEnable, setOpenedToEnable] = useState(false);
   const [confirmEnable, setConfirmEnable] = useState(false);
+  const hasModels = (query.data?.models.length ?? 0) > 0;
   const active = Boolean(
     query.data?.enabled && takeover?.codex && status?.running,
   );
+
+  useEffect(() => {
+    updateCodexGuideSignals({
+      routeEnabled: active,
+      proxyEnabled: Boolean(takeover?.codex && status?.running),
+    });
+  }, [active, takeover?.codex, status?.running]);
 
   const setEnabled = async (enabled: boolean) => {
     try {
@@ -57,55 +88,85 @@ export function CodexModelRoutingCard({
     <>
       <section
         className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-default bg-card px-4 py-3"
+        data-tour="codex-routing-card"
         aria-label={t("codexRouting.cardTitle", {
           defaultValue: "Codex 聚合模型路由",
         })}
       >
         <div className="flex min-w-0 items-center gap-3">
           <Network className="h-5 w-5 shrink-0 text-primary" />
-          <div>
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold">
               {t("codexRouting.cardTitle", {
                 defaultValue: "Codex 聚合模型路由",
               })}
             </h2>
-            <p className="mt-1 break-words text-xs text-muted-foreground">
-              {query.data
-                ? t("codexRouting.routeNameSummary", {
-                    name: query.data.providerName,
-                    count: query.data.models.length,
-                    defaultValue: "聚合路由名称：{{name}} · {{count}} 个模型",
-                  })
-                : t("codexRouting.offlineHint", {
-                    defaultValue:
-                      "从已有供应商选择模型；未启动服务也能提前配置。",
-                  })}
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {t("codexRouting.cardIntro", {
+                defaultValue:
+                  "同时接入多个供应商和官方订阅；配置生效后，在 Codex 内按模型切换来源，无需每次重启。",
+              })}
             </p>
+            {query.data && (
+              <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                {t("codexRouting.routeNameSummary", {
+                  name: query.data.providerName,
+                  count: query.data.models.length,
+                  defaultValue: "聚合路由名称：{{name}} · {{count}} 个模型",
+                })}
+              </p>
+            )}
+            {query.data && !hasModels && (
+              <p
+                id="codex-routing-pick-hint"
+                className="mt-1 text-xs text-muted-foreground"
+              >
+                {t("codexRouting.pickModelsFirst", {
+                  defaultValue: "还没选择模型。点开关或「管理模型」去挑选。",
+                })}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              setOpenedToEnable(false);
+              setOpen(true);
+            }}
             disabled={toggle.isPending}
+            data-tour="codex-routing-manage"
           >
             <Settings2 className="mr-2 h-4 w-4" />
             {t("codexRouting.manage", { defaultValue: "管理模型" })}
           </Button>
           {toggle.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
           <Switch
+            data-tour="codex-routing-switch"
             checked={active}
             disabled={query.isLoading || query.isError || toggle.isPending}
             aria-label={t("codexRouting.enable", {
               defaultValue: "启用 Codex 模型路由",
             })}
+            aria-describedby={
+              query.data && !hasModels ? "codex-routing-pick-hint" : undefined
+            }
+            title={
+              query.data && !hasModels
+                ? t("codexRouting.pickModelsFirstHint", {
+                    defaultValue: "请先选择模型",
+                  })
+                : undefined
+            }
             onCheckedChange={(enabled) => {
               if (!enabled) {
                 void setEnabled(false);
                 return;
               }
               if (!query.data?.models.length) {
+                setOpenedToEnable(true);
                 setOpen(true);
                 return;
               }
@@ -126,11 +187,17 @@ export function CodexModelRoutingCard({
       </section>
       <CodexModelRoutingDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setOpenedToEnable(false);
+        }}
+        promptToEnable={openedToEnable}
         providers={providers}
         active={active}
         onEditProvider={onEditProvider}
         detailEditorOpen={detailEditorOpen}
+        onAddProvider={onAddProvider}
+        addProviderOpen={addProviderOpen}
       />
       <ConfirmDialog
         isOpen={confirmEnable}

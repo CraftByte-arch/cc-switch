@@ -1,3 +1,4 @@
+import { updateCodexGuideSignals } from "@/lib/codexGuide";
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -96,7 +97,9 @@ export function useProviderActions(
       },
     ) => {
       const enhanced = injectCodingPlanUsageScript(activeApp, provider);
-      await addProviderMutation.mutateAsync(enhanced);
+      const added = await addProviderMutation.mutateAsync(enhanced);
+      if (activeApp === "codex" && added?.id)
+        updateCodexGuideSignals({ savedProviderId: added.id });
 
       // OpenClaw: register models to allowlist after adding provider
       if (activeApp === "openclaw" && provider.suggestedDefaults) {

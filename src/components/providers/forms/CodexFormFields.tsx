@@ -1,6 +1,13 @@
 import { CodexCatalogModelFields } from "./CodexCatalogModelFields";
 import { optimizeCodexModelDisplayName } from "@/utils/codexCatalog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CODEX_GUIDE_EVENT,
+  getCodexGuideDetail,
+  isCodexGuideMappingStep,
+  updateCodexGuideSignals,
+  type CodexGuideDetail,
+} from "@/lib/codexGuide";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FormLabel } from "@/components/ui/form";
@@ -256,6 +263,31 @@ export function CodexFormFields({
 
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [guideFetchState, setGuideFetchState] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
+  useEffect(() => {
+    if (appId !== "codex") return;
+    updateCodexGuideSignals({
+      keyReady: Boolean(codexApiKey.trim()),
+      urlReady: Boolean(codexBaseUrl.trim()),
+      official:
+        category === "official" || isCodexOauthPreset || isXaiOauthPreset,
+      mappingCount: catalogModels.filter((model) => model.model.trim()).length,
+      fetchState: guideFetchState,
+      fetchedCount: fetchedModels.length,
+    });
+  }, [
+    appId,
+    codexApiKey,
+    codexBaseUrl,
+    category,
+    isCodexOauthPreset,
+    isXaiOauthPreset,
+    catalogModels,
+    guideFetchState,
+    fetchedModels.length,
+  ]);
   // 拉取请求序号：请求身份（Base URL / 完整地址开关 / API Key / 自定义 UA）
   // 一变即自增，清空旧列表并作废在途响应——/models 结果可能按 Key 的模型
   // 授权返回，换号后残留旧列表会误导选择
@@ -263,6 +295,7 @@ export function CodexFormFields({
 
   useEffect(() => {
     fetchModelsSeqRef.current += 1;
+    setGuideFetchState("idle");
     setFetchedModels((prev) => (prev.length === 0 ? prev : []));
   }, [
     codexBaseUrl,
@@ -304,7 +337,9 @@ export function CodexFormFields({
     promptCacheRouting !== "auto" ||
     !!maxOutputTokens;
   const [advancedExpanded, setAdvancedExpanded] = useState(
-    isXaiOauthPreset ? false : hasAnyAdvancedValue,
+    () =>
+      (isXaiOauthPreset ? false : hasAnyAdvancedValue) ||
+      isCodexGuideMappingStep(getCodexGuideDetail().stepId),
   );
 
   // 预设/编辑加载填充高级值后自动展开（仅从折叠→展开，不会自动折叠）；
@@ -317,6 +352,18 @@ export function CodexFormFields({
       setAdvancedExpanded(true);
     }
   }, [hasAnyAdvancedValue, isXaiOauthPreset]);
+
+  useEffect(() => {
+    const sync = (stepId: string | null) => {
+      if (isCodexGuideMappingStep(stepId)) setAdvancedExpanded(true);
+    };
+    sync(getCodexGuideDetail().stepId);
+    const onGuide = (event: Event) => {
+      sync((event as CustomEvent<CodexGuideDetail>).detail.stepId);
+    };
+    window.addEventListener(CODEX_GUIDE_EVENT, onGuide);
+    return () => window.removeEventListener(CODEX_GUIDE_EVENT, onGuide);
+  }, []);
 
   const [catalogRows, setCatalogRows] = useState<CodexCatalogRow[]>(() =>
     catalogModels.map((m) => createCatalogRow(m)),
@@ -390,10 +437,12 @@ export function CodexFormFields({
       }
       const seq = ++fetchModelsSeqRef.current;
       setIsFetchingModels(true);
+      setGuideFetchState("loading");
       fetchXaiOauthModels(selectedXaiAccountId ?? null)
         .then((models) => {
           if (seq !== fetchModelsSeqRef.current) return;
           setFetchedModels(models);
+          setGuideFetchState("success");
           if (models.length === 0) {
             toast.info(t("providerForm.fetchModelsEmpty"));
           } else {
@@ -405,6 +454,7 @@ export function CodexFormFields({
         .catch((err) => {
           if (seq !== fetchModelsSeqRef.current) return;
           console.warn("[XaiOAuth] Failed to fetch models:", err);
+          setGuideFetchState("error");
           showFetchModelsError(err, t);
         })
         .finally(() => setIsFetchingModels(false));
@@ -412,6 +462,7 @@ export function CodexFormFields({
     }
 
     if (!codexBaseUrl || !codexApiKey) {
+      setGuideFetchState("error");
       showFetchModelsError(null, t, {
         hasApiKey: !!codexApiKey,
         hasBaseUrl: !!codexBaseUrl,
@@ -420,6 +471,7 @@ export function CodexFormFields({
     }
     const seq = ++fetchModelsSeqRef.current;
     setIsFetchingModels(true);
+    setGuideFetchState("loading");
     fetchModelsForConfig(
       codexBaseUrl,
       codexApiKey,
@@ -430,6 +482,7 @@ export function CodexFormFields({
       .then((models) => {
         if (seq !== fetchModelsSeqRef.current) return;
         setFetchedModels(models);
+        setGuideFetchState("success");
         if (models.length === 0) {
           toast.info(t("providerForm.fetchModelsEmpty"));
         } else {
@@ -441,6 +494,7 @@ export function CodexFormFields({
       .catch((err) => {
         if (seq !== fetchModelsSeqRef.current) return;
         console.warn("[ModelFetch] Failed:", err);
+        setGuideFetchState("error");
         showFetchModelsError(err, t);
       })
       .finally(() => setIsFetchingModels(false));
@@ -552,6 +606,7 @@ export function CodexFormFields({
         type="button"
         variant="outline"
         size="sm"
+        data-tour="codex-fetch-models"
         onClick={handleFetchModels}
         disabled={isFetchingModels}
         className="h-7 gap-1"
@@ -567,6 +622,7 @@ export function CodexFormFields({
         type="button"
         variant="outline"
         size="sm"
+        data-tour="codex-add-mapping"
         onClick={onAdd}
         className="h-7 gap-1"
       >
@@ -580,75 +636,85 @@ export function CodexFormFields({
     <>
       {/* Codex OAuth 账号选择 */}
       {isCodexOauthPreset && (
-        <CodexOAuthSection
-          mode="select"
-          selectedAccountId={selectedCodexAccountId}
-          onAccountSelect={onCodexAccountSelect}
-          onSelectionConfirmed={onCodexAuthSelectionConfirmed}
-          onSelectionInvalidated={onCodexAuthSelectionInvalidated}
-          onManageAccounts={
-            onManageAuthAccounts
-              ? () => onManageAuthAccounts("codex_oauth")
-              : undefined
-          }
-          selectionLabel={codexOauthSelectionLabel}
-          noneOptionLabel={codexOauthNoneOptionLabel}
-          noneOptionDescription={codexOauthNoneOptionDescription}
-          allowUnboundSelection={codexOauthAllowUnboundSelection}
-          allowUnboundSelectionWithoutStatus={
-            codexOauthAllowUnboundSelectionWithoutStatus
-          }
-          nativeLoginOnly={codexOauthNativeLoginOnly}
-          requireExplicitSelection={codexOauthRequireExplicitSelection}
-        />
+        <div data-tour="codex-provider-auth">
+          <CodexOAuthSection
+            mode="select"
+            selectedAccountId={selectedCodexAccountId}
+            onAccountSelect={onCodexAccountSelect}
+            onSelectionConfirmed={onCodexAuthSelectionConfirmed}
+            onSelectionInvalidated={onCodexAuthSelectionInvalidated}
+            onManageAccounts={
+              onManageAuthAccounts
+                ? () => onManageAuthAccounts("codex_oauth")
+                : undefined
+            }
+            selectionLabel={codexOauthSelectionLabel}
+            noneOptionLabel={codexOauthNoneOptionLabel}
+            noneOptionDescription={codexOauthNoneOptionDescription}
+            allowUnboundSelection={codexOauthAllowUnboundSelection}
+            allowUnboundSelectionWithoutStatus={
+              codexOauthAllowUnboundSelectionWithoutStatus
+            }
+            nativeLoginOnly={codexOauthNativeLoginOnly}
+            requireExplicitSelection={codexOauthRequireExplicitSelection}
+          />
+        </div>
       )}
 
       {/* xAI OAuth 认证（Grok 订阅托管账号） */}
       {isXaiOauthPreset && (
-        <XaiOAuthSection
-          selectedAccountId={selectedXaiAccountId}
-          onAccountSelect={onXaiAccountSelect}
-        />
+        <div data-tour="codex-provider-auth">
+          <XaiOAuthSection
+            selectedAccountId={selectedXaiAccountId}
+            onAccountSelect={onXaiAccountSelect}
+          />
+        </div>
       )}
 
-      {/* Codex API Key 输入框（托管 OAuth 预设无需 Key） */}
-      {!isCodexOauthPreset && !isXaiOauthPreset && (
-        <ApiKeySection
-          id="codexApiKey"
-          label="API Key"
-          value={codexApiKey}
-          onChange={onApiKeyChange}
-          category={category}
-          shouldShowLink={shouldShowApiKeyLink}
-          websiteUrl={websiteUrl}
-          isPartner={isPartner}
-          partnerPromotionKey={partnerPromotionKey}
-          placeholder={{
-            official: t("providerForm.codexOfficialNoApiKey", {
-              defaultValue: "官方供应商无需 API Key",
-            }),
-            thirdParty: t("providerForm.codexApiKeyAutoFill", {
-              defaultValue: "输入 API Key，将自动填充到配置",
-            }),
-          }}
-        />
-      )}
+      <div data-tour="codex-provider-basics" className="space-y-4">
+        {/* Codex API Key 输入框（托管 OAuth 预设无需 Key） */}
+        {!isCodexOauthPreset && !isXaiOauthPreset && (
+          <div data-tour="codex-api-key">
+            <ApiKeySection
+              id="codexApiKey"
+              label="API Key"
+              value={codexApiKey}
+              onChange={onApiKeyChange}
+              category={category}
+              shouldShowLink={shouldShowApiKeyLink}
+              websiteUrl={websiteUrl}
+              isPartner={isPartner}
+              partnerPromotionKey={partnerPromotionKey}
+              placeholder={{
+                official: t("providerForm.codexOfficialNoApiKey", {
+                  defaultValue: "官方供应商无需 API Key",
+                }),
+                thirdParty: t("providerForm.codexApiKeyAutoFill", {
+                  defaultValue: "输入 API Key，将自动填充到配置",
+                }),
+              }}
+            />
+          </div>
+        )}
 
-      {/* Codex Base URL 输入框（托管 OAuth 端点由 adapter 硬定向，不展示） */}
-      {shouldShowSpeedTest && !isXaiOauthPreset && (
-        <EndpointField
-          id="codexBaseUrl"
-          label={t("codexConfig.apiUrlLabel")}
-          value={codexBaseUrl}
-          onChange={onBaseUrlChange}
-          placeholder={t("providerForm.codexApiEndpointPlaceholder")}
-          hint={t("providerForm.codexApiHint")}
-          showFullUrlToggle
-          isFullUrl={isFullUrl}
-          onFullUrlChange={onFullUrlChange}
-          onManageClick={() => onEndpointModalToggle(true)}
-        />
-      )}
+        {/* Codex Base URL 输入框（托管 OAuth 端点由 adapter 硬定向，不展示） */}
+        {shouldShowSpeedTest && !isXaiOauthPreset && (
+          <div data-tour="codex-api-url">
+            <EndpointField
+              id="codexBaseUrl"
+              label={t("codexConfig.apiUrlLabel")}
+              value={codexBaseUrl}
+              onChange={onBaseUrlChange}
+              placeholder={t("providerForm.codexApiEndpointPlaceholder")}
+              hint={t("providerForm.codexApiHint")}
+              showFullUrlToggle
+              isFullUrl={isFullUrl}
+              onFullUrlChange={onFullUrlChange}
+              onManageClick={() => onEndpointModalToggle(true)}
+            />
+          </div>
+        )}
+      </div>
 
       {/* 默认模型 —— config.toml 顶层 model，Codex 启动时默认请求的模型。
           实时写回 TOML；留空则删行（有映射时保存回退为映射第一行）。 */}
@@ -1042,6 +1108,7 @@ export function CodexFormFields({
                 model-catalogs.json；留空则不生成。排在自定义 UA 之前。 */}
             {canEditCatalog && (
               <div
+                data-tour="codex-model-mapping"
                 className={cn(
                   "space-y-4",
                   (shouldShowSpeedTest || (isChatFormat && canEditReasoning)) &&
@@ -1100,6 +1167,7 @@ export function CodexFormFields({
                     {catalogRows.map((row, index) => (
                       <div
                         key={row.rowId}
+                        data-tour="codex-mapping-row"
                         className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_140px_1fr_36px]"
                       >
                         <CodexCatalogModelFields

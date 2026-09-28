@@ -85,6 +85,8 @@ import {
   CodexMaintenanceActions,
   CodexMaintenanceDialog,
 } from "@/components/proxy/CodexMaintenance";
+import { CodexGuide } from "@/components/codex/CodexGuide";
+import { CODEX_GUIDE_EVENT, type CodexGuideDetail } from "@/lib/codexGuide";
 import { CodexModelRoutingCard } from "@/components/proxy/CodexModelRoutingCard";
 import UsageScriptModal from "@/components/UsageScriptModal";
 import UnifiedMcpPanel from "@/components/mcp/UnifiedMcpPanel";
@@ -196,6 +198,15 @@ function App() {
     useState<SkillsPageSource>("repos");
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
   const [isAddOpen, setIsAddOpen] = useState(false);
+  useEffect(() => {
+    const onPlace = (event: Event) => {
+      const detail = (event as CustomEvent<CodexGuideDetail>).detail;
+      if (!detail.stepId) return; // Exit leaves unsaved work open.
+      setIsAddOpen(detail.place === "add");
+    };
+    window.addEventListener(CODEX_GUIDE_EVENT, onPlace);
+    return () => window.removeEventListener(CODEX_GUIDE_EVENT, onPlace);
+  }, []);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [mcpManagementBusy, setMcpManagementBusy] = useState(false);
   const [skillsManagementBusy, setSkillsManagementBusy] = useState(false);
@@ -1195,6 +1206,8 @@ function App() {
                         providers={providers}
                         onEditProvider={setEditingProvider}
                         detailEditorOpen={Boolean(editingProvider)}
+                        onAddProvider={() => setIsAddOpen(true)}
+                        addProviderOpen={isAddOpen}
                       />
                     )}
                     <ProviderList
@@ -1835,6 +1848,9 @@ function App() {
                       className={`ml-2 ${addActionButtonClass}`}
                       aria-label={t("provider.addNewProvider")}
                       title={t("provider.addNewProvider")}
+                      data-tour={
+                        activeApp === "codex" ? "codex-add-provider" : undefined
+                      }
                     >
                       <Plus className="w-5 h-5" />
                     </Button>
@@ -1926,6 +1942,11 @@ function App() {
       />
 
       <CodexMaintenanceDialog />
+      <CodexGuide
+        providers={providers}
+        currentProviderId={currentProviderId}
+        active={activeApp === "codex" && currentView === "providers"}
+      />
       <DeepLinkImportDialog />
       <FirstRunNoticeDialog />
     </div>

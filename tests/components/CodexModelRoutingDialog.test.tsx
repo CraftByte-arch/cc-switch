@@ -853,7 +853,7 @@ describe("CodexModelRoutingDialog", () => {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: "前缀：—" }));
-    fireEvent.click(screen.getByRole("tab", { name: "模型排序 · 0" }));
+    fireEvent.click(screen.getByRole("tab", { name: "模型排序" }));
     fireEvent.click(screen.getByRole("button", { name: "修改官方前缀" }));
     expect(screen.getByRole("tab", { name: "可选模型" })).toHaveAttribute(
       "aria-selected",
