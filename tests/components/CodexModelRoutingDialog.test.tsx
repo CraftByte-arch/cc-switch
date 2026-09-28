@@ -797,7 +797,7 @@ describe("CodexModelRoutingDialog", () => {
       screen.getByRole("button", { name: "保存路由配置" }),
     ).toHaveAttribute("aria-describedby", "routing-save-reason");
     expect(
-      screen.queryByRole("button", { name: "设置", exact: true }),
+      screen.queryByRole("button", { name: "设置" }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "检查设置" }));
     expect(screen.getByLabelText("Provider 显示名称")).toHaveFocus();
@@ -864,7 +864,7 @@ describe("CodexModelRoutingDialog", () => {
       "true",
     );
     expect(
-      screen.queryByRole("button", { name: "设置", exact: true }),
+      screen.queryByRole("button", { name: "设置" }),
     ).not.toBeInTheDocument();
   });
 

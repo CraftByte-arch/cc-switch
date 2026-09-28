@@ -68,9 +68,10 @@ interface ProviderCardProps {
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
   isProxyRunning: boolean;
-  isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管，切换为热切换）
+  isProxyTakeover?: boolean; // 路由模式（切换只改代理路由）
   isCodexModelRoutingActive?: boolean;
   codexRoutingModelCount?: number;
+  isDirectProvider?: boolean; // 路由模式下的直连供应商：退出路由时写回它
   dragHandleProps?: DragHandleProps;
   isAutoFailoverEnabled?: boolean; // 是否开启自动故障转移
   failoverPriority?: number; // 故障转移优先级（1 = P1, 2 = P2, ...）
@@ -190,6 +191,7 @@ export function ProviderCard({
   isProxyTakeover = false,
   isCodexModelRoutingActive = false,
   codexRoutingModelCount = 0,
+  isDirectProvider = false,
   dragHandleProps,
   isAutoFailoverEnabled = false,
   failoverPriority,
@@ -499,11 +501,14 @@ export function ProviderCard({
                 />
               )}
 
-              {isCodexModelRoutingActive && isCurrent && (
+              {isDirectProvider && (
                 <ProviderStatusBadge
-                  tone="success"
-                  label={t("provider.routingDefaultBadge", {
-                    defaultValue: "路由关闭后使用",
+                  tone="muted"
+                  label={t("provider.directProvider", {
+                    defaultValue: "直连",
+                  })}
+                  title={t("provider.directProviderHint", {
+                    defaultValue: "退出路由后恢复为这个供应商",
                   })}
                 />
               )}

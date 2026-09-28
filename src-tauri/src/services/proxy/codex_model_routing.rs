@@ -57,6 +57,31 @@ pub struct ModelRoutingSaveResult {
     pub catalog_changed: bool,
 }
 
+
+fn codex_file_has_login() -> bool {
+    let path = crate::codex_config::get_codex_auth_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(auth) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    let placeholder = auth.get("OPENAI_API_KEY").and_then(|value| value.as_str())
+        == Some(crate::live::project::claude::PROXY_TOKEN_PLACEHOLDER);
+    !placeholder && crate::codex_config::codex_auth_has_openai_account_material(&auth)
+}
+
+fn codex_live_login_state(config_text: &str) -> Option<bool> {
+    use crate::codex_config::CodexAuthStoreMode;
+    match crate::codex_config::codex_config_auth_store_mode(config_text) {
+        CodexAuthStoreMode::File => Some(codex_file_has_login()),
+        CodexAuthStoreMode::Ephemeral => Some(false),
+        CodexAuthStoreMode::Keyring
+        | CodexAuthStoreMode::Auto
+        | CodexAuthStoreMode::Unknown => None,
+    }
+}
+
 impl ProxyService {
     pub(crate) fn codex_model_routing_config(&self) -> Result<CodexModelRoutingConfig, String> {
         self.db.get_codex_model_routing().map_err(|e| e.to_string())
@@ -121,9 +146,9 @@ impl ProxyService {
         let existing = crate::codex_config::read_codex_config_text().map_err(|e| e.to_string())?;
         let mut projected =
             routing::project_config(&existing, config, &base_url).map_err(|e| e.to_string())?;
-        // Preserve the login-aware desktop compatibility behavior of ordinary
-        // takeover without reading, rewriting or exposing the login itself.
-        if let Some(has_login) = Self::codex_live_login_state(&projected) {
+        // Preserve the login-aware desktop compatibility behavior without
+        // reading, rewriting or exposing the login itself.
+        if let Some(has_login) = codex_live_login_state(&projected) {
             projected =
                 crate::codex_config::align_codex_requires_openai_auth_with_login_preservation(
                     &projected, has_login,
@@ -153,15 +178,6 @@ impl ProxyService {
             return Err(error);
         }
         Ok(catalog_changed)
-    }
-
-    pub(crate) async fn refresh_codex_model_routing_live(&self) -> Result<(), String> {
-        let config = self.codex_model_routing_config()?;
-        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, &config)
-            .map_err(|e| e.to_string())?;
-        self.project_codex_model_routing(&config, &providers)
-            .await?;
-        Ok(())
     }
 
     /// Saving a draft never activates the service or changes the mode flag.
@@ -234,8 +250,7 @@ impl ProxyService {
             return Err(error.to_string());
         }
         if active {
-            self.refresh_active_target_from_current_provider(&AppType::Codex)
-                .await;
+            self.mark_codex_routing_active_target(&config.provider_name).await;
         }
         Ok(ModelRoutingSaveResult {
             config,
@@ -243,14 +258,23 @@ impl ProxyService {
         })
     }
 
-    /// Shares the normal takeover transaction, backup and per-app lock.
-    /// Enabling from ordinary takeover preserves its original restore backup.
-    pub async fn set_codex_model_routing_enabled(&self, enabled: bool) -> Result<(), String> {
-        let _guard = self.switch_locks.lock_for_app("codex").await;
+    /// Turn Codex model routing on or off.
+    ///
+    /// Enabling enters proxy mode and projects the routed `config.toml`.
+    /// Disabling leaves proxy mode first, while the flag is still on, so the
+    /// direct provider's key fields replace the routing projection. An ordinary
+    /// proxy session is left alone when routing is already off.
+    pub async fn set_codex_model_routing_enabled(
+        &self,
+        state: &crate::store::AppState,
+        enabled: bool,
+    ) -> Result<(), String> {
+        let app = AppType::Codex;
+        let _guard = crate::mode::controller::lock_settled(state, &app)
+            .await
+            .map_err(|error| error.to_string())?;
         let old = self.codex_model_routing_config()?;
         if !enabled && !old.enabled {
-            // Routing is already off. In particular, do not disable an
-            // otherwise ordinary Codex takeover that happens to be active.
             return Ok(());
         }
         let mut config = old.clone();
@@ -274,6 +298,7 @@ impl ProxyService {
                 return Err("官方模型配置属于其他登录或旧缓存，请同步后重新保存".into());
             }
         }
+        let was_proxy = crate::mode::current::is_proxy(&app);
         if enabled {
             let providers =
                 crate::proxy::codex_native_route::providers_for_config(&self.db, &config)
@@ -288,24 +313,171 @@ impl ProxyService {
             self.db
                 .save_codex_model_routing(&config)
                 .map_err(|e| e.to_string())?;
-            if let Err(error) = self.set_takeover_for_app_inner("codex", true).await {
+            if let Err(error) = crate::mode::controller::enter_locked(
+                state,
+                &app,
+                crate::mode::state::op::ENTER,
+            )
+            .await
+            {
                 let db_rollback = self.db.save_codex_model_routing(&old);
+                if !was_proxy {
+                    let _ = crate::mode::controller::exit_locked(
+                        state,
+                        &app,
+                        false,
+                    );
+                }
                 let file_rollback = snapshot.restore();
                 return Err(format!(
                     "{error}; 配置回滚: {db_rollback:?}; 文件回滚: {file_rollback:?}"
                 ));
             }
-        } else {
-            // Restore while the mode flag is still true, so router auth is
-            // never mistaken for a station's native-login credentials.
-            if old.enabled {
-                self.set_takeover_for_app_inner("codex", false).await?;
-            }
+        } else if old.enabled {
+            // Leave proxy while the flag is still on, then record routing as off.
+            // exit_locked writes the direct provider back over the projection.
+            crate::mode::controller::exit_locked(state, &app, false)?;
             self.db
                 .save_codex_model_routing(&config)
                 .map_err(|e| e.to_string())?;
+            drop(_guard);
+            crate::mode::controller::stop_server_if_unused(state).await;
         }
         Ok(())
+    }
+
+    /// Model routing owns the live config. Switching only changes the provider
+    /// restored after routing is turned off.
+    pub(crate) async fn set_codex_default_provider_while_routing_inner(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), String> {
+        if !self.codex_model_routing_enabled()? {
+            return Err("Codex 模型路由未启用".into());
+        }
+        let provider = self
+            .db
+            .get_provider_by_id(provider_id, "codex")
+            .map_err(|e| format!("读取供应商失败: {e}"))?
+            .ok_or_else(|| format!("供应商不存在: {provider_id}"))?;
+        let previous = crate::mode::current::provider_for(
+            &self.db,
+            &AppType::Codex,
+            crate::mode::current::Purpose::Direct,
+        )
+        .map_err(|e| e.to_string())?;
+        if let Err(error) =
+            crate::settings::set_current_provider(&AppType::Codex, Some(provider_id))
+        {
+            return Err(format!("更新本地默认供应商失败: {error}"));
+        }
+        if let Err(error) = self.db.set_current_provider("codex", provider_id) {
+            if let Err(rollback_error) =
+                crate::settings::set_current_provider(&AppType::Codex, previous.as_deref())
+            {
+                log::error!("恢复本地 Codex 默认供应商失败: {rollback_error}");
+            }
+            return Err(format!("更新默认供应商失败: {error}"));
+        }
+        log::info!(
+            "Codex 模型路由开启：已将关闭路由后的默认供应商设置为 {} ({})，未改写 Live 配置",
+            provider.name,
+            provider.id
+        );
+        Ok(())
+    }
+
+    /// Remove route entries for a provider before deleting it. Returns the
+    /// previous config so the caller can restore it if deletion fails.
+    /// The caller owns the Codex switch lock.
+    pub(crate) async fn remove_codex_provider_references_inner(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<crate::proxy::codex_model_routing::CodexModelRoutingConfig>, String> {
+        let old = self.codex_model_routing_config()?;
+        if !old.references_provider(provider_id) {
+            return Ok(None);
+        }
+        let mut next = old.clone();
+        next.models.retain(|entry| entry.provider_id != provider_id);
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, &next)
+            .map_err(|e| e.to_string())?;
+        let takeover = self
+            .db
+            .get_proxy_config_for_app("codex")
+            .await
+            .map_err(|e| e.to_string())?
+            .enabled;
+        let active = old.enabled && takeover;
+        next.validate(&providers, active)
+            .map_err(|e| e.to_string())?;
+        next.validate_visible_combinations(&providers)
+            .map_err(|e| e.to_string())?;
+
+        let files = if active {
+            Some(RouterFiles::capture().map_err(|e| e.to_string())?)
+        } else {
+            None
+        };
+        if active {
+            if let Err(error) = self.project_codex_model_routing(&next, &providers).await {
+                return Err(error);
+            }
+        }
+        if let Err(error) = self.db.save_codex_model_routing(&next) {
+            if let Some(files) = files {
+                files
+                    .restore()
+                    .map_err(|rollback| format!("{error}; 回滚路由文件失败: {rollback}"))?;
+            }
+            return Err(error.to_string());
+        }
+        Ok(Some(old))
+    }
+
+    pub(crate) async fn restore_codex_model_routing_config_inner(
+        &self,
+        config: &crate::proxy::codex_model_routing::CodexModelRoutingConfig,
+    ) -> Result<(), String> {
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, config)
+            .map_err(|e| e.to_string())?;
+        let takeover = self
+            .db
+            .get_proxy_config_for_app("codex")
+            .await
+            .map_err(|e| e.to_string())?
+            .enabled;
+        if config.enabled && takeover {
+            self.project_codex_model_routing(config, &providers).await?;
+        }
+        self.db
+            .save_codex_model_routing(config)
+            .map_err(|e| e.to_string())
+    }
+
+    pub(crate) async fn project_codex_model_routing_if_enabled(&self) -> Result<(), String> {
+        let config = self.codex_model_routing_config()?;
+        if !config.enabled {
+            return Ok(());
+        }
+        let providers = crate::proxy::codex_native_route::providers_for_config(&self.db, &config)
+            .map_err(|e| e.to_string())?;
+        self.project_codex_model_routing(&config, &providers).await?;
+        self.mark_codex_routing_active_target(&config.provider_name)
+            .await;
+        Ok(())
+    }
+
+    async fn mark_codex_routing_active_target(&self, provider_name: &str) {
+        if let Some(server) = self.server.read().await.as_ref() {
+            server
+                .set_active_target(
+                    "codex",
+                    crate::proxy::codex_model_routing::PROVIDER_ID,
+                    provider_name.trim(),
+                )
+                .await;
+        }
     }
 
     /// Provider edit fast path while routing owns Live. Do not replace the

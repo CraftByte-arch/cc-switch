@@ -205,25 +205,20 @@ impl ProviderService {
         providers.insert(provider.id.clone(), provider.clone());
         config.validate(&providers, false)?;
         config.validate_visible_combinations(&providers)?;
-        let current = crate::settings::get_effective_current_provider(&state.db, &AppType::Codex)?
-            .as_deref()
-            == Some(&provider.id);
-        let snapshot = if current {
-            Some(crate::codex_config::CodexLiveStateSnapshot::capture()?)
-        } else {
-            None
-        };
-        let backup = if current {
-            futures::executor::block_on(state.db.get_live_backup("codex"))?
-        } else {
-            None
-        };
+        let in_use = crate::mode::current::provider_for(
+            &state.db,
+            &AppType::Codex,
+            crate::mode::current::Purpose::InUse,
+        )?
+        .as_deref()
+            == Some(provider.id.as_str());
         let result = (|| {
-            if current {
-                live::sync_live_for_provider_respecting_takeover_guarded(
+            if in_use {
+                live::sync_live_for_provider_respecting_mode(
                     state,
                     &AppType::Codex,
                     &provider,
+                    Some(&original),
                 )?;
             }
             state.db.save_provider("codex", &provider)?;
@@ -238,18 +233,16 @@ impl ProviderService {
             if let Err(e) = state.db.save_codex_model_routing(&old_config) {
                 failures.push(e.to_string());
             }
-            let error = if let Some(snapshot) = &snapshot {
-                Self::managed_codex_takeover_transaction_error(
+            if in_use {
+                if let Err(e) = live::sync_live_for_provider_respecting_mode(
                     state,
-                    "修改供应商模型",
-                    error,
-                    snapshot,
-                    backup.as_ref(),
-                    None,
-                )
-            } else {
-                error
-            };
+                    &AppType::Codex,
+                    &original,
+                    Some(&provider),
+                ) {
+                    failures.push(e.to_string());
+                }
+            }
             return Err(if failures.is_empty() {
                 error
             } else {
@@ -259,7 +252,7 @@ impl ProviderService {
         Ok(CodexRoutingProviderEditResult {
             provider,
             config,
-            affects_live: current,
+            affects_live: in_use,
         })
     }
 }
