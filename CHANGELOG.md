@@ -5,6 +5,21 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.20.10] - 2026-09-29
+
+### Fixed
+- Official-subscription login now discovers the nested CLI bundled with current ChatGPT/Codex desktop releases on macOS, including common and per-user application locations, without activating the desktop GUI just to locate its CLI.
+- Native login and official model discovery compare usable desktop and standalone CLI versions using SemVer instead of selecting the first executable. A stable release wins over a prerelease with the same version core; build metadata does not change precedence. Equal versions retain deterministic candidate order.
+- Bounded concurrent version probes skip missing, broken, or unresponsive candidates and preserve the best successful result at the deadline.
+- Login failures distinguish incompatible or invalid configuration, missing CLI, unsupported credential storage, process startup, callback-port conflicts, policy restrictions, network errors, and authorization timeouts instead of showing one generic error.
+
+### Changed
+- Login feedback shows actionable, localized recovery guidance, a retry action, and expandable details for the actual CLI version and executable path, including improved dark-mode readability.
+- CLI diagnostics are drained with bounded retention and classified without exposing raw output, authorization URLs, or credentials to the UI or logs. Existing provider configuration and credentials are not rewritten by discovery.
+
+### Compatibility
+- On macOS, native login supports a standalone CLI, a desktop-bundled CLI, or both. The highest usable discovered CLI version is selected; the selected version must still support the active Codex configuration. Other platforms retain standalone CLI discovery.
+
 ## [3.20.9] - 2026-09-28
 
 ### Added

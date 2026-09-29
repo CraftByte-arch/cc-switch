@@ -49,10 +49,25 @@ export interface CodexNativeRoutingStatus {
   error: string | null;
 }
 
+export type CodexNativeLoginErrorCode =
+  | "cliNotFound"
+  | "configInvalid"
+  | "configIncompatible"
+  | "storageUnsupported"
+  | "launchFailed"
+  | "portInUse"
+  | "policyRestricted"
+  | "network"
+  | "timeout"
+  | "processFailed"
+  | "unknown";
+
 export interface CodexNativeLoginStatus {
   id: string;
   status: "waiting" | "succeeded" | "failed" | "cancelled";
   error: string | null;
+  errorCode?: CodexNativeLoginErrorCode | null;
+  cli?: { path: string; version: string } | null;
 }
 
 /** Field-scoped patch + optimistic concurrency checks. No credentials are sent. */

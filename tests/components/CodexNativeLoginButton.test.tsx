@@ -82,4 +82,102 @@ describe("native browser login", () => {
     expect(onComplete).not.toHaveBeenCalled();
     expect(successToast).not.toHaveBeenCalled();
   });
+  it("explains an incompatible CLI and shows the executable actually used", async () => {
+    const cli = { path: "/opt/homebrew/bin/codex", version: "0.128.0" };
+    api.startNativeLogin.mockResolvedValue({
+      id: "old-cli",
+      status: "waiting",
+      error: null,
+      cli,
+    });
+    api.nativeLoginStatus.mockResolvedValue({
+      id: "old-cli",
+      status: "failed",
+      error: "safe fallback",
+      errorCode: "configIncompatible",
+      cli,
+    });
+    const onComplete = vi.fn();
+    render(<CodexNativeLoginButton disabled={false} onComplete={onComplete} />);
+    fireEvent.click(screen.getByRole("button", { name: "登录 ChatGPT" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续登录" }));
+    const alert = await screen.findByRole("alert", {}, { timeout: 2000 });
+    expect(alert).toHaveTextContent(
+      zh.codexRouting.subscription.loginErrors.configIncompatible.title,
+    );
+    expect(alert).toHaveTextContent("更新下方路径对应的 CLI");
+    expect(alert).not.toHaveTextContent("safe fallback");
+    const details = screen
+      .getByText("查看登录程序：Codex CLI 0.128.0")
+      .closest("details");
+    expect(details).toHaveTextContent(cli.path);
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "重新登录" })).toBeEnabled();
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(successToast).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "cliNotFound",
+    "configInvalid",
+    "storageUnsupported",
+    "launchFailed",
+    "portInUse",
+    "policyRestricted",
+    "network",
+    "timeout",
+    "processFailed",
+    "unknown",
+  ] as const)(
+    "shows actionable %s failures even before polling starts",
+    async (code) => {
+      api.startNativeLogin.mockResolvedValue({
+        id: "failed-start",
+        status: "failed",
+        error: "safe fallback",
+        errorCode: code,
+      });
+      const view = render(
+        <CodexNativeLoginButton disabled={false} onComplete={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "登录 ChatGPT" }));
+      fireEvent.click(screen.getByRole("button", { name: "继续登录" }));
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        zh.codexRouting.subscription.loginErrors[code].title,
+      );
+      expect(alert).toHaveTextContent(
+        zh.codexRouting.subscription.loginErrors[code].hint,
+      );
+      expect(api.nativeLoginStatus).not.toHaveBeenCalled();
+      view.unmount();
+      expect(api.cancelNativeLogin).not.toHaveBeenCalled();
+    },
+  );
+
+  it("clears outdated diagnostics and CLI metadata when retrying", async () => {
+    api.startNativeLogin.mockResolvedValueOnce({
+      id: "old",
+      status: "failed",
+      error: "old failure",
+      errorCode: "configIncompatible",
+      cli: { path: "/old/codex", version: "0.128.0" },
+    });
+    render(<CodexNativeLoginButton disabled={false} onComplete={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "登录 ChatGPT" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续登录" }));
+    await screen.findByRole("alert");
+    api.startNativeLogin.mockRejectedValueOnce(
+      new Error("Could not start a new login"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "重新登录" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续登录" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Could not start a new login",
+      ),
+    );
+    expect(screen.queryByText("/old/codex")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("与配置不兼容");
+  });
 });

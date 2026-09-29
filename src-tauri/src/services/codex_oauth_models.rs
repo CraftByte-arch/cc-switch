@@ -114,69 +114,189 @@ async fn detected_native_client_version() -> Option<String> {
     native_client_command().await.map(|(_, version)| version)
 }
 
-pub(crate) async fn native_client_command() -> Option<(std::path::PathBuf, String)> {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let mut candidates = Vec::new();
-        #[cfg(target_os = "macos")]
-        {
-            let path = tokio::time::timeout(
-                Duration::from_secs(2),
-                tokio::process::Command::new("/usr/bin/osascript")
-                    .args([
-                        "-e",
-                        "POSIX path of (path to application id \"com.openai.codex\")",
-                    ])
-                    .kill_on_drop(true)
-                    .output(),
-            )
-            .await;
-            if let Ok(Ok(output)) = path {
-                if output.status.success() {
-                    if let Ok(path) = String::from_utf8(output.stdout) {
-                        candidates.push(
-                            std::path::PathBuf::from(path.trim()).join("Contents/Resources/codex"),
-                        );
-                    }
-                }
+// Resolve desktop bundles without AppleScript's `path to application`: that can
+// activate the GUI even though we only need its CLI, not the desktop login UI.
+#[cfg(target_os = "macos")]
+async fn desktop_app_bundles() -> Vec<std::path::PathBuf> {
+    let mut bundles = Vec::new();
+    let output = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::process::Command::new("/usr/bin/mdfind")
+            .arg("kMDItemCFBundleIdentifier == 'com.openai.codex'")
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    if let Ok(Ok(output)) = output {
+        if output.status.success() {
+            if let Ok(paths) = String::from_utf8(output.stdout) {
+                bundles.extend(
+                    paths
+                        .lines()
+                        .filter(|path| !path.is_empty())
+                        .map(std::path::PathBuf::from),
+                );
             }
         }
-        candidates.extend(crate::codex_config::codex_cli_candidates());
-        for candidate in candidates {
+    }
+    // Spotlight may be disabled or have a stale index. GUI apps also usually
+    // lack the shell PATH, so cover both names and per-user installations.
+    for applications in [
+        std::path::PathBuf::from("/Applications"),
+        crate::config::get_home_dir().join("Applications"),
+    ] {
+        for name in ["ChatGPT.app", "Codex.app"] {
+            let bundle = applications.join(name);
+            if !bundles.contains(&bundle) {
+                bundles.push(bundle);
+            }
+        }
+    }
+    bundles
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn desktop_cli_candidates(bundle: &std::path::Path) -> Vec<std::path::PathBuf> {
+    // New desktop releases nest the CLI in codex-cli; older releases placed it
+    // directly under Resources. Prefer the supported launcher when present.
+    [
+        "Contents/Resources/codex-cli/bin/codex",
+        "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        "Contents/Resources/codex",
+    ]
+    .into_iter()
+    .map(|relative| bundle.join(relative))
+    .filter(|path| path.is_file())
+    .collect()
+}
+
+pub(crate) async fn native_client_command() -> Option<(std::path::PathBuf, String)> {
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "macos")]
+    for bundle in desktop_app_bundles().await {
+        candidates.extend(desktop_cli_candidates(&bundle));
+    }
+    candidates.extend(crate::codex_config::codex_cli_candidates());
+    // Desktop discovery has its own two-second limit. Probe for at most another
+    // three seconds, keeping the best completed result even if another CLI hangs.
+    probe_native_client_candidates(candidates).await
+}
+
+async fn probe_native_client_candidates(
+    candidates: Vec<std::path::PathBuf>,
+) -> Option<(std::path::PathBuf, String)> {
+    probe_native_client_candidates_with_budget(candidates, Duration::from_secs(3)).await
+}
+
+async fn probe_native_client_candidates_with_budget(
+    candidates: Vec<std::path::PathBuf>,
+    budget: Duration,
+) -> Option<(std::path::PathBuf, String)> {
+    use futures::StreamExt;
+    use semver::Version;
+    use std::collections::HashSet;
+
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut seen = HashSet::new();
+    let candidates = candidates
+        .into_iter()
+        .map(resolve_native_cli_path)
+        .filter(|path| is_cli_executable(path) && seen.insert(path.clone()))
+        .collect::<Vec<_>>();
+    // Do not let candidate order or one slow installation hide a newer CLI.
+    let probes = futures::stream::iter(candidates.into_iter().enumerate())
+        .map(|(index, candidate)| async move {
             let mut command = tokio::process::Command::new(&candidate);
-            command.arg("--version").kill_on_drop(true);
+            command
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .kill_on_drop(true);
             #[cfg(target_os = "windows")]
             command.creation_flags(0x08000000);
-            if let Ok(Ok(output)) =
-                tokio::time::timeout(Duration::from_secs(2), command.output()).await
-            {
-                if output.status.success() {
-                    if let Some(version) =
-                        parsed_client_version(&String::from_utf8_lossy(&output.stdout))
-                    {
-                        return Some((candidate, version));
-                    }
+            let output = tokio::time::timeout(Duration::from_secs(2), command.output())
+                .await
+                .ok()?
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let text = parsed_client_version(&String::from_utf8_lossy(&output.stdout))?;
+            let version = Version::parse(&text).ok()?;
+            Some((index, candidate, version))
+        })
+        .buffer_unordered(8);
+    futures::pin_mut!(probes);
+    let mut selected: Option<(usize, std::path::PathBuf, Version)> = None;
+    while let Ok(Some(result)) = tokio::time::timeout_at(deadline, probes.next()).await {
+        let Some((index, path, version)) = result else {
+            continue;
+        };
+        let preferred = selected.as_ref().is_none_or(|(old_index, _, old_version)| {
+            // SemVer precedence compares numeric components and prereleases;
+            // build metadata does not rank a release higher. Break true ties by
+            // original candidate order, not whichever process finished first.
+            version
+                .cmp_precedence(old_version)
+                .then_with(|| old_index.cmp(&index))
+                .is_gt()
+        });
+        if preferred {
+            selected = Some((index, path, version));
+        }
+    }
+    selected.map(|(_, path, version)| (path, version.to_string()))
+}
+
+fn resolve_native_cli_path(candidate: std::path::PathBuf) -> std::path::PathBuf {
+    if candidate.components().count() != 1 {
+        return candidate;
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            let path = directory.join(&candidate);
+            if is_cli_executable(&path) {
+                return if path.is_absolute() {
+                    path
+                } else {
+                    std::env::current_dir()
+                        .map(|cwd| cwd.join(&path))
+                        .unwrap_or(path)
+                };
+            }
+            #[cfg(target_os = "windows")]
+            for extension in ["exe", "cmd", "bat"] {
+                let path = path.with_extension(extension);
+                if path.is_file() {
+                    return path;
                 }
             }
         }
-        None
-    })
-    .await
-    .ok()
-    .flatten()
+    }
+    candidate
+}
+
+fn is_cli_executable(path: &std::path::Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn parsed_client_version(text: &str) -> Option<String> {
     text.split_whitespace()
-        .find(|part| {
-            let core = part.split('-').next().unwrap_or("");
-            let numbers: Vec<_> = core.split('.').collect();
-            numbers.len() == 3
-                && numbers.iter().all(|number| number.parse::<u32>().is_ok())
-                && part.len() < 96
-                && part
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b".-+".contains(&c))
-        })
+        .find(|part| part.len() < 96 && semver::Version::parse(part).is_ok())
         .map(str::to_owned)
 }
 
@@ -268,6 +388,207 @@ fn truncate_body(body: String) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_path_lookup_rejects_non_executable_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("codex");
+        assert!(!is_cli_executable(&path));
+        std::fs::write(&path, "fixture").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_cli_executable(&path));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(is_cli_executable(&path));
+        assert!(!is_cli_executable(dir.path()));
+        assert_eq!(resolve_native_cli_path(path.clone()), path);
+    }
+
+    #[test]
+    fn desktop_cli_candidates_support_new_and_legacy_layouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("ChatGPT.app");
+        assert!(desktop_cli_candidates(&bundle).is_empty());
+        let legacy = bundle.join("Contents/Resources/codex");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, "fixture").unwrap();
+        assert_eq!(desktop_cli_candidates(&bundle), vec![legacy.clone()]);
+
+        let native = bundle.join("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::write(&native, "fixture").unwrap();
+        assert_eq!(
+            desktop_cli_candidates(&bundle),
+            vec![native.clone(), legacy.clone()]
+        );
+
+        let launcher = bundle.join("Contents/Resources/codex-cli/bin/codex");
+        std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        std::fs::write(&launcher, "fixture").unwrap();
+        assert_eq!(
+            desktop_cli_candidates(&bundle),
+            vec![launcher, native, legacy]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_client_prefers_nested_desktop_cli_over_old_path_cli() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("ChatGPT.app");
+        let desktop = bundle.join("Contents/Resources/codex-cli/bin/codex");
+        let old_cli = dir.path().join("old-codex");
+        for (path, version) in [(&desktop, "0.158.0-alpha.2.1"), (&old_cli, "0.128.0")] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!("#!/bin/sh\n[ \"$1\" = --version ] || exit 1\necho codex-cli {version}\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut candidates = desktop_cli_candidates(&bundle);
+        candidates.push(old_cli.clone());
+        let (path, version) = probe_native_client_candidates(candidates).await.unwrap();
+        assert_eq!(path, desktop);
+        assert_eq!(version, "0.158.0-alpha.2.1");
+
+        // Missing/broken desktop installations still fall back to a CLI install.
+        std::fs::write(&desktop, "#!/bin/sh\nexit 1\n").unwrap();
+        let (path, version) = probe_native_client_candidates(vec![desktop, old_cli.clone()])
+            .await
+            .unwrap();
+        assert_eq!(path, old_cli);
+        assert_eq!(version, "0.128.0");
+    }
+
+    #[test]
+    fn client_versions_accept_semver_and_reject_invalid_or_unsafe_tokens() {
+        for version in ["0.158.0", "0.158.0-alpha.2.1", "1.10.0", "0.158.0+build.7"] {
+            assert_eq!(
+                parsed_client_version(&format!("codex-cli {version}")),
+                Some(version.into())
+            );
+        }
+        for output in [
+            "not a version",
+            "codex-cli 0.158",
+            "codex-cli 0.158.0.1",
+            "codex-cli 01.158.0",
+            "codex-cli 0.158.0-alpha.01",
+        ] {
+            assert!(parsed_client_version(output).is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_version_fixture(path: &std::path::Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!("#!/bin/sh\n[ \"$1\" = --version ] || exit 90\n{body}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_client_selects_highest_version_regardless_of_installation_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let desktop = dir
+            .path()
+            .join("ChatGPT App.app/Contents/Resources/codex-cli/bin/codex");
+        let standalone = dir.path().join("standalone/codex");
+        for (desktop_version, standalone_version, standalone_wins) in [
+            ("0.128.0", "0.158.0", true),
+            ("0.159.0", "0.158.0", false),
+            ("0.158.0-alpha.2.1", "0.158.0", true),
+            ("0.158.0", "0.158.0-alpha.2.1", false),
+            ("0.158.0", "0.159.0-alpha.1", true),
+            ("0.9.0", "0.10.0", true),
+            ("0.158.0-alpha.2.1", "0.158.0-alpha.10.1", true),
+        ] {
+            write_version_fixture(&desktop, &format!("echo codex-cli {desktop_version}"));
+            write_version_fixture(&standalone, &format!("echo codex-cli {standalone_version}"));
+            for reverse in [false, true] {
+                let mut candidates = vec![desktop.clone(), standalone.clone()];
+                if reverse {
+                    candidates.reverse();
+                }
+                let (path, version) = probe_native_client_candidates(candidates).await.unwrap();
+                let (expected_path, expected_version) = if standalone_wins {
+                    (&standalone, standalone_version)
+                } else {
+                    (&desktop, desktop_version)
+                };
+                assert_eq!(
+                    &path, expected_path,
+                    "{desktop_version} vs {standalone_version}"
+                );
+                assert_eq!(version, expected_version);
+            }
+        }
+        // Either installation remains sufficient on its own.
+        for path in [desktop, standalone] {
+            assert_eq!(
+                probe_native_client_candidates(vec![path.clone()])
+                    .await
+                    .unwrap()
+                    .0,
+                path
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn equal_precedence_keeps_candidate_order_not_probe_completion_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first-codex");
+        let second = dir.path().join("second-codex");
+        for (first_version, second_version) in [
+            ("0.158.0", "0.158.0"),
+            ("0.158.0+build.1", "0.158.0+build.99"),
+        ] {
+            write_version_fixture(
+                &first,
+                &format!("sleep 0.08; echo codex-cli {first_version}"),
+            );
+            write_version_fixture(&second, &format!("echo codex-cli {second_version}"));
+            let selected = probe_native_client_candidates(vec![first.clone(), second.clone()])
+                .await
+                .unwrap();
+            assert_eq!(selected, (first.clone(), first_version.into()));
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn slow_or_invalid_candidates_do_not_discard_a_usable_cli() {
+        let dir = tempfile::tempdir().unwrap();
+        let slow = dir.path().join("slow-codex");
+        let invalid = dir.path().join("invalid-codex");
+        let usable = dir.path().join("usable-codex");
+        write_version_fixture(&slow, "exec /bin/sleep 30");
+        write_version_fixture(&invalid, "echo not-a-version");
+        write_version_fixture(&usable, "echo codex-cli 0.158.0");
+        let selected = tokio::time::timeout(
+            Duration::from_secs(3),
+            probe_native_client_candidates_with_budget(
+                vec![slow, invalid, usable.clone()],
+                Duration::from_millis(500),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(selected, (usable, "0.158.0".into()));
+        assert!(probe_native_client_candidates(Vec::new()).await.is_none());
+    }
 
     #[test]
     fn codex_oauth_model_discovery_uses_gpt6_compatible_identity() {

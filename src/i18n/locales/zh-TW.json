@@ -3404,8 +3404,57 @@
       "loginConfirm": "將在瀏覽器中啟動 Codex 官方登入，並由 Codex 儲存登入憑證。此操作可能取代現有 Codex 登入憑證，即使取消也可能需要重新登入；不會修改中轉供應商金鑰或路由設定。",
       "loginContinue": "繼續登入",
       "loginWaiting": "等待瀏覽器授權…",
-      "loginFallback": "瀏覽器未開啟？可取消後在終端機執行 codex login，完成後點選重新檢測。",
-      "loginSucceeded": "登入成功，正在同步官方模型。瀏覽器成功頁可手動關閉。"
+      "loginFallback": "登入由本機 Codex CLI 開啟瀏覽器完成，不會在桌面用戶端內彈出登入視窗。瀏覽器未開啟時，可取消後使用上方同一 CLI 執行 login，再重新偵測。",
+      "loginSucceeded": "登入成功，正在同步官方模型。瀏覽器成功頁可手動關閉。",
+      "loginErrors": {
+        "cliNotFound": {
+          "title": "找不到可用的 Codex CLI",
+          "hint": "請安裝或更新獨立 Codex CLI，或包含 CLI 的桌面用戶端，再重試。僅在瀏覽器登入 ChatGPT 無法啟動此流程。"
+        },
+        "configInvalid": {
+          "title": "無法讀取 Codex 設定",
+          "hint": "登入尚未開始。請檢查設定及模型目錄檔案是否存在、格式是否正確，以及是否有讀取權限；不必先重新授權帳號。"
+        },
+        "configIncompatible": {
+          "title": "目前的 Codex CLI 與設定不相容",
+          "hint": "登入尚未開始：CLI 無法辨識設定中的欄位或參數，通常是版本過舊。請更新下方路徑對應的 CLI，再重新登入；只更新另一份桌面用戶端或 CLI 可能無效。"
+        },
+        "storageUnsupported": {
+          "title": "目前設定無法儲存登入",
+          "hint": "請檢查 cli_auth_credentials_store，使用持久化憑證儲存；ephemeral 僅在處理程序內儲存，CC Switch 無法讀取。受管理的設定請聯絡管理員。"
+        },
+        "launchFailed": {
+          "title": "Codex CLI 無法啟動",
+          "hint": "請檢查下方程式路徑及 Codex 設定目錄是否存在、是否有執行或存取權限。必要時重新安裝對應用戶端。"
+        },
+        "portInUse": {
+          "title": "登入回呼連接埠被占用",
+          "hint": "請先完成或取消其他尚未完成的 Codex 登入，再重新登入。無需登出，也不要直接結束不明處理程序。"
+        },
+        "policyRestricted": {
+          "title": "目前策略不允許此登入方式",
+          "hint": "請檢查 forced_login_method 等登入限制；若由組織管理，請聯絡管理員確認是否允許 ChatGPT 登入。"
+        },
+        "network": {
+          "title": "無法連線至登入服務",
+          "hint": "請檢查網路、代理及系統憑證後重試。此錯誤不代表帳號密碼錯誤。"
+        },
+        "timeout": {
+          "title": "瀏覽器授權等待逾時",
+          "hint": "請重新登入，並在新開啟的瀏覽器頁面於 10 分鐘內完成授權。舊頁面可能已失效。"
+        },
+        "processFailed": {
+          "title": "無法確認登入結果",
+          "hint": "請先使用重新偵測登入狀態的按鈕；若仍未登入，再重新嘗試。"
+        },
+        "unknown": {
+          "title": "登入未完成，原因尚未辨識",
+          "hint": "請確認瀏覽器授權已完成。仍失敗時，可取消後在終端機使用下方同一 CLI 路徑執行 login，查看錯誤；終端機預設的 codex 可能是另一版本。"
+        }
+      },
+      "loginRetry": "重新登入",
+      "loginCliDetails": "查看登入程式：Codex CLI {{version}}",
+      "loginCliExplanation": "這是本次實際呼叫的 CLI。CC Switch 會比較可用安裝的版本，優先使用較新版本；獨立安裝與桌面用戶端內建的版本可能不同。"
     },
     "safetyHint": "支持当前官方订阅登录与 API Key 中转模型同时启用，不使用全局故障转移。跨线路续聊可能因响应 ID 不兼容需要新建会话；不会改写历史。",
     "selectionNeedsAttentionDraft": "部分已選模型需要處理。路由未在執行，本次仍可儲存；啟用路由前請先查看模型排序。",

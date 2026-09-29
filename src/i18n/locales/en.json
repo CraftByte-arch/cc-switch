@@ -3403,8 +3403,57 @@
       "loginConfirm": "This starts the official Codex login in the browser and lets Codex store the credentials. It may replace existing Codex credentials, and canceling may still require signing in again. Relay keys and routing are not changed.",
       "loginContinue": "Continue sign-in",
       "loginWaiting": "Waiting for browser authorization…",
-      "loginFallback": "Browser did not open? Cancel, run codex login in a terminal, then recheck.",
-      "loginSucceeded": "Signed in. Syncing official models. You can close the browser success page."
+      "loginFallback": "The local Codex CLI opens browser authorization, not a desktop-app login dialog. If no browser opens, cancel and run login with the same CLI above, then recheck.",
+      "loginSucceeded": "Signed in. Syncing official models. You can close the browser success page.",
+      "loginErrors": {
+        "cliNotFound": {
+          "title": "No usable Codex CLI found",
+          "hint": "Install or update the standalone Codex CLI or a desktop app that includes it, then retry. Signing in to ChatGPT in a browser alone is not enough to start this flow."
+        },
+        "configInvalid": {
+          "title": "Codex configuration could not be read",
+          "hint": "Login has not started. Check the configuration and model catalog files for missing paths, invalid syntax, or read permissions. Reauthorizing your account is not the first step."
+        },
+        "configIncompatible": {
+          "title": "This Codex CLI cannot read the configuration",
+          "hint": "Login has not started: the CLI does not recognize a configuration field or value, often because it is outdated. Update the CLI at the path below, then retry; updating a different CLI or desktop app may not help."
+        },
+        "storageUnsupported": {
+          "title": "These settings cannot save a login",
+          "hint": "Check cli_auth_credentials_store and use persistent credential storage. Ephemeral credentials only live in the process and cannot be read by CC Switch. Contact your administrator for managed settings."
+        },
+        "launchFailed": {
+          "title": "Codex CLI could not start",
+          "hint": "Check that the executable below and the Codex configuration directory exist and allow execution or access. Reinstall the corresponding client if necessary."
+        },
+        "portInUse": {
+          "title": "The login callback port is busy",
+          "hint": "Finish or cancel other pending Codex logins, then retry. You do not need to sign out or terminate an unidentified process."
+        },
+        "policyRestricted": {
+          "title": "Login is restricted by policy",
+          "hint": "Check restrictions such as forced_login_method. For organization-managed settings, ask your administrator whether ChatGPT login is allowed."
+        },
+        "network": {
+          "title": "Cannot connect to the login service",
+          "hint": "Check your network, proxy, and system certificates, then retry. This does not mean your password is incorrect."
+        },
+        "timeout": {
+          "title": "Browser authorization timed out",
+          "hint": "Retry login and complete authorization in the newly opened browser page within 10 minutes. The old page may no longer be valid."
+        },
+        "processFailed": {
+          "title": "Could not confirm the login result",
+          "hint": "Use the sign-in recheck button first. If you are still signed out, retry login."
+        },
+        "unknown": {
+          "title": "Login did not finish; the cause is unknown",
+          "hint": "Check that browser authorization completed. If it still fails, cancel and run login in a terminal using the same CLI path below to see the error. The terminal's default codex may be a different version."
+        }
+      },
+      "loginRetry": "Retry login",
+      "loginCliDetails": "Login program: Codex CLI {{version}}",
+      "loginCliExplanation": "This is the CLI used for this attempt. CC Switch compares usable installations and selects the newer version; standalone and desktop-bundled versions may differ."
     },
     "safetyHint": "支持当前官方订阅登录与 API Key 中转模型同时启用，不使用全局故障转移。跨线路续聊可能因响应 ID 不兼容需要新建会话；不会改写历史。",
     "selectionNeedsAttentionDraft": "Some selected models need attention. Routing is not running, so you can still save; review model order before turning it on.",

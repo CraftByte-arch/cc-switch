@@ -3348,8 +3348,57 @@
       "loginConfirm": "将在浏览器中启动 Codex 官方登录，并由 Codex 保存登录凭据。此操作可能替换现有 Codex 登录凭据，即使取消也可能需要重新登录；不会修改中转供应商密钥或路由配置。",
       "loginContinue": "继续登录",
       "loginWaiting": "等待浏览器授权…",
-      "loginFallback": "浏览器未打开？可取消后在终端运行 codex login，完成后点击重新检测。",
-      "loginSucceeded": "登录成功，正在同步官方模型。浏览器成功页可手动关闭。"
+      "loginFallback": "登录由本机 Codex CLI 打开浏览器完成，不是在桌面客户端内弹窗。浏览器未打开时，可取消后使用上方同一 CLI 执行 login，再点击重新检测。",
+      "loginSucceeded": "登录成功，正在同步官方模型。浏览器成功页可手动关闭。",
+      "loginErrors": {
+        "cliNotFound": {
+          "title": "没有找到可用的 Codex CLI",
+          "hint": "请安装或更新独立 Codex CLI，或包含 CLI 的桌面客户端，再重试。仅在浏览器登录 ChatGPT 不足以启动此流程。"
+        },
+        "configInvalid": {
+          "title": "Codex 配置无法读取",
+          "hint": "登录尚未开始。请检查 Codex 配置和模型目录文件是否存在、格式是否正确，以及是否有读取权限；不必先重新授权账号。"
+        },
+        "configIncompatible": {
+          "title": "当前 Codex CLI 与配置不兼容",
+          "hint": "登录尚未开始：CLI 无法识别配置中的字段或参数，通常是版本过旧。请更新下方路径对应的 CLI，再重新登录；只更新另一份桌面端或 CLI 可能无效。"
+        },
+        "storageUnsupported": {
+          "title": "当前设置无法保存登录",
+          "hint": "请检查 cli_auth_credentials_store，使用持久化凭据存储；ephemeral 仅在进程内保存，CC Switch 无法读取。若配置由管理员管理，请联系管理员。"
+        },
+        "launchFailed": {
+          "title": "Codex CLI 没能启动",
+          "hint": "请检查下方程序路径和 Codex 配置目录是否存在、是否有运行或访问权限。重新安装对应客户端后可再次尝试。"
+        },
+        "portInUse": {
+          "title": "登录回调端口被占用",
+          "hint": "请先结束其他尚未完成的 Codex 登录，再点击“重新登录”。无需退出账号，也不要直接结束不明进程。"
+        },
+        "policyRestricted": {
+          "title": "当前策略不允许这种登录",
+          "hint": "请检查 forced_login_method 等登录限制；如果是组织管理的配置，请联系管理员确认是否允许 ChatGPT 登录。"
+        },
+        "network": {
+          "title": "无法连接登录服务",
+          "hint": "请检查网络、代理和系统证书后重试。此错误不代表账号密码错误。"
+        },
+        "timeout": {
+          "title": "浏览器授权等待超时",
+          "hint": "请点击“重新登录”，在新打开的浏览器页面完成授权。每次等待最多 10 分钟，旧页面可能已经失效。"
+        },
+        "processFailed": {
+          "title": "无法确认登录结果",
+          "hint": "请先点击“我已登录，重新检测”确认状态；如仍未登录，再重新尝试。"
+        },
+        "unknown": {
+          "title": "登录未完成，原因尚未识别",
+          "hint": "请确认浏览器授权已完成。仍失败时，可取消后在终端使用下方同一 CLI 路径执行 login，查看具体错误；终端默认的 codex 可能是另一版本。"
+        }
+      },
+      "loginRetry": "重新登录",
+      "loginCliDetails": "查看登录程序：Codex CLI {{version}}",
+      "loginCliExplanation": "这是本次实际调用的 CLI。CC Switch 会比较可用安装的版本，优先使用较新版本；独立安装和桌面端内置的版本可能不同。"
     },
     "quick": {
       "context": "上下文",
